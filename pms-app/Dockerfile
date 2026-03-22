@@ -5,11 +5,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# 의존성 설치 (package-lock.json 기반 재현 가능한 설치)
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# 소스 복사
 COPY . .
 
 # Firebase 환경변수 (빌드 시 NEXT_PUBLIC_* 변수는 번들에 포함됨)
@@ -28,28 +26,29 @@ ENV NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=$NEXT_PUBLIC_FIREBASE_MESSAGING_SEN
 ENV NEXT_PUBLIC_FIREBASE_APP_ID=$NEXT_PUBLIC_FIREBASE_APP_ID
 ENV NEXT_PUBLIC_USE_EMULATOR=false
 
-# 정적 빌드 (output: export → out/ 디렉토리 생성)
+# standalone 빌드 → .next/standalone 디렉토리 생성
 RUN npm run build
 
 # ─────────────────────────────────────────────
-# Stage 2: Serve (nginx)
+# Stage 2: Run (Node.js standalone server)
 # ─────────────────────────────────────────────
-FROM nginx:stable-alpine AS runner
+FROM node:20-alpine AS runner
 
-# 기본 nginx 설정 제거
-RUN rm /etc/nginx/conf.d/default.conf
+WORKDIR /app
 
-# SPA용 nginx 설정 복사
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+ENV NODE_ENV=production
 
-# 빌드 결과물 복사 (out/ → nginx html 루트)
-COPY --from=builder /app/out /usr/share/nginx/html
+# standalone 서버 파일 복사
+COPY --from=builder /app/.next/standalone ./
+# 정적 자산 복사 (.next/static → .next/static)
+COPY --from=builder /app/.next/static ./.next/static
+# public 폴더 복사
+COPY --from=builder /app/public ./public
 
-# Cloud Run은 PORT 환경변수로 포트를 주입함
-# nginx는 envsubst로 PORT를 동적으로 적용
+# Cloud Run은 PORT 환경변수로 포트를 주입함 (기본값 8080)
 ENV PORT=8080
+ENV HOSTNAME=0.0.0.0
 
 EXPOSE 8080
 
-# nginx.conf의 $PORT를 실제 값으로 치환 후 실행
-CMD ["/bin/sh", "-c", "envsubst '$PORT' < /etc/nginx/conf.d/default.conf > /tmp/default.conf && mv /tmp/default.conf /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+CMD ["node", "server.js"]

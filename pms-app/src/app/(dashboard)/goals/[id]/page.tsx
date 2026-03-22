@@ -165,13 +165,11 @@ export default function GoalDetailPage() {
 
       if (isLead) {
         if (goal.status === 'PENDING_APPROVAL' && ownerRole === 'MEMBER') {
-          // 팀장 1차 승인
           newStatus = 'LEAD_APPROVED';
           updateData = { status: 'LEAD_APPROVED', leadApprovedBy: userProfile.id, leadApprovedAt: new Date() };
           successMsg = '1차 승인했습니다. 임원의 최종 승인을 기다립니다.';
           historyComment = '팀장 1차 승인';
         } else if (goal.status === 'COMPLETED' && !goal.leadApprovedBy && ownerRole === 'MEMBER') {
-          // 완료 1차 확인
           updateData = { leadApprovedBy: userProfile.id, leadApprovedAt: new Date() };
           successMsg = '완료를 1차 확인했습니다. 임원의 최종 확인을 기다립니다.';
           historyComment = '팀장 완료 1차 확인';
@@ -183,24 +181,20 @@ export default function GoalDetailPage() {
         }
       } else if (isExec) {
         if (goal.status === 'LEAD_APPROVED') {
-          // 임원 최종 승인 (팀원 목표)
           newStatus = 'APPROVED';
           updateData = { status: 'APPROVED', approvedBy: userProfile.id, approvedAt: new Date() };
           successMsg = '최종 승인했습니다.';
           historyComment = '임원 최종 승인';
         } else if (goal.status === 'PENDING_APPROVAL' && ownerRole === 'TEAM_LEAD') {
-          // 임원 직접 승인 (팀장 목표)
           newStatus = 'APPROVED';
           updateData = { status: 'APPROVED', approvedBy: userProfile.id, approvedAt: new Date() };
           successMsg = '목표를 승인했습니다.';
           historyComment = '임원 승인';
         } else if (goal.status === 'COMPLETED' && goal.leadApprovedBy && ownerRole === 'MEMBER') {
-          // 팀원 완료 임원 최종 확인
           updateData = { approvedBy: userProfile.id, approvedAt: new Date() };
           successMsg = '완료를 최종 확인했습니다.';
           historyComment = '임원 완료 최종 확인';
         } else if (goal.status === 'COMPLETED' && ownerRole === 'TEAM_LEAD') {
-          // 팀장 완료 임원 확인
           updateData = { approvedBy: userProfile.id, approvedAt: new Date() };
           successMsg = '완료를 확인했습니다.';
           historyComment = '임원 완료 확인';
@@ -277,14 +271,12 @@ export default function GoalDetailPage() {
   const canRequestAbandon = isOwner && ['APPROVED', 'IN_PROGRESS'].includes(goal.status);
   const canUpdateProgress = isOwner && ['APPROVED', 'IN_PROGRESS'].includes(goal.status);
 
-  // 팀장 승인 가능 조건
   const canLeadApprove = isLead && (
     (goal.status === 'PENDING_APPROVAL' && ownerRole === 'MEMBER') ||
     (goal.status === 'COMPLETED' && !goal.leadApprovedBy && ownerRole === 'MEMBER') ||
     (goal.status === 'PENDING_ABANDON' && ownerRole === 'MEMBER')
   );
 
-  // 임원 승인 가능 조건
   const canExecApprove = isExec && (
     goal.status === 'LEAD_APPROVED' ||
     (goal.status === 'PENDING_APPROVAL' && ownerRole === 'TEAM_LEAD') ||
@@ -295,11 +287,9 @@ export default function GoalDetailPage() {
 
   const canApprove = canLeadApprove || canExecApprove;
 
-  // 반려 가능 조건
   const canReject = (isLead && ['PENDING_APPROVAL', 'COMPLETED'].includes(goal.status) && ownerRole === 'MEMBER') ||
     (isExec && ['LEAD_APPROVED', 'PENDING_APPROVAL', 'COMPLETED'].includes(goal.status));
 
-  // 승인 버튼 라벨
   function getApproveLabel() {
     if (isLead) {
       if (goal!.status === 'PENDING_APPROVAL') return '1차 승인';
@@ -315,7 +305,6 @@ export default function GoalDetailPage() {
     return '승인';
   }
 
-  // COMPLETED 진행 단계 표시
   const completionStep = goal.status === 'COMPLETED'
     ? (!goal.leadApprovedBy && ownerRole === 'MEMBER'
         ? '팀장 1차 확인 대기'
@@ -379,7 +368,6 @@ export default function GoalDetailPage() {
               <Progress value={goal.progress} className="h-2" />
             </div>
 
-            {/* 팀원 액션 */}
             {(canRequestApproval || canRequestCompletion || canRequestAbandon) && (
               <div className="flex gap-2 pt-2 border-t flex-wrap">
                 {canRequestApproval && (
@@ -406,7 +394,6 @@ export default function GoalDetailPage() {
               </div>
             )}
 
-            {/* 승인/반려 버튼 */}
             {canApprove && (
               <div className="space-y-3 pt-2 border-t">
                 <div className="flex items-center gap-2">

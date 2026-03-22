@@ -112,7 +112,6 @@ export default function OneOnOneDetailPage() {
   }
 
   const isLeader = userProfile.id === room.leaderId;
-  // 질문은 양쪽 모두 가능, 답변은 질문자가 아닌 상대방만 가능
   const canAnswer = (q: OneOnOneQuestion) => !q.answer && q.askerId !== userProfile.id;
 
   return (
@@ -120,7 +119,6 @@ export default function OneOnOneDetailPage() {
       <Header title="1on1 Q&A" />
       <div className="flex-1 overflow-y-auto">
 
-        {/* 상단 정보 */}
         <div className="border-b bg-white px-6 py-4">
           <button
             onClick={() => router.back()}
@@ -144,7 +142,6 @@ export default function OneOnOneDetailPage() {
           </div>
         </div>
 
-        {/* Q&A 목록 */}
         <div className="p-6 space-y-4 max-w-2xl mx-auto w-full">
           {questions.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
@@ -159,7 +156,6 @@ export default function OneOnOneDetailPage() {
                 : null;
               return (
                 <div key={q.id} className="rounded-xl border bg-white overflow-hidden">
-                  {/* 질문 */}
                   <div className="p-4 space-y-2">
                     <div className="flex items-center gap-2">
                       <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-600 text-xs font-semibold shrink-0">
@@ -176,7 +172,6 @@ export default function OneOnOneDetailPage() {
                     <p className="text-sm text-gray-800 whitespace-pre-wrap pl-9">{q.question}</p>
                   </div>
 
-                  {/* 답변 */}
                   {q.answer ? (
                     <div className="border-t bg-gray-50 p-4 space-y-2">
                       <div className="flex items-center gap-2">
@@ -230,7 +225,6 @@ export default function OneOnOneDetailPage() {
         </div>
       </div>
 
-      {/* 질문 입력 */}
       <div className="border-t bg-white p-4">
         <div className="max-w-2xl mx-auto flex gap-2 items-end">
           <Textarea
