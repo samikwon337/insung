@@ -1,0 +1,871 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import {
+  getActiveCycle,
+  getGoalsByUser,
+  getGoalsByOrganization,
+  getSelfEvaluation,
+  getSelfEvaluationsByUsers,
+  upsertSelfEvaluation,
+  getIndividualEvaluation,
+  upsertIndividualEvaluation,
+  getIndividualEvaluationsByOrg,
+  getUsersByOrganization,
+  getAllUsers,
+  getOrganizations,
+  getAllDivisionGradeQuotas,
+} from '@/lib/firestore';
+import Header from '@/components/layout/Header';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+import { ChevronDown, ChevronUp, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import type {
+  EvaluationCycle, Goal, SelfEvaluation, IndividualEvaluation,
+  EvaluationGrade, User, Organization, DivisionGradeQuota,
+} from '@/types';
+
+const GRADES: EvaluationGrade[] = ['A', 'B', 'C', 'D', 'E'];
+
+const GRADE_COLOR: Record<EvaluationGrade, string> = {
+  A: 'bg-blue-100 text-blue-700',
+  B: 'bg-green-100 text-green-700',
+  C: 'bg-gray-100 text-gray-700',
+  D: 'bg-orange-100 text-orange-700',
+  E: 'bg-red-100 text-red-600',
+};
+
+const GOAL_STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  DRAFT:            { label: '초안',       color: 'bg-gray-100 text-gray-500' },
+  PENDING_APPROVAL: { label: '승인 요청',  color: 'bg-yellow-100 text-yellow-700' },
+  LEAD_APPROVED:    { label: '1차 승인',   color: 'bg-blue-100 text-blue-600' },
+  APPROVED:         { label: '승인됨',     color: 'bg-blue-100 text-blue-700' },
+  REJECTED:         { label: '반려',       color: 'bg-red-100 text-red-600' },
+  IN_PROGRESS:      { label: '진행 중',    color: 'bg-indigo-100 text-indigo-700' },
+  COMPLETED:        { label: '완료',       color: 'bg-green-100 text-green-700' },
+  PENDING_ABANDON:  { label: '포기 요청',  color: 'bg-orange-100 text-orange-600' },
+  ABANDONED:        { label: '포기됨',     color: 'bg-gray-100 text-gray-400' },
+};
+
+function getDescendantOrgIds(orgId: string, orgs: Organization[]): string[] {
+  const result: string[] = [orgId];
+  for (const child of orgs.filter(o => o.parentId === orgId)) {
+    result.push(...getDescendantOrgIds(child.id, orgs));
+  }
+  return result;
+}
+
+function LoadingSpinner() {
+  return (
+    <div className="flex min-h-[200px] items-center justify-center">
+      <div className="h-7 w-7 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+    </div>
+  );
+}
+
+// ─── 라우터 ───────────────────────────────────────────────
+export default function EvaluationPage() {
+  const { userProfile } = useAuth();
+  if (!userProfile) return null;
+  const { role } = userProfile;
+  if (role === 'MEMBER')    return <MemberEvalView />;
+  if (role === 'TEAM_LEAD') return <TeamLeadEvalView />;
+  if (role === 'EXECUTIVE') return <ExecutiveEvalView />;
+  return (
+    <div className="flex flex-col h-full">
+      <Header title="평가 관리" />
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-gray-400">접근 권한이 없습니다.</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── 팀원: 자기평가 ──────────────────────────────────────
+function MemberEvalView() {
+  const { userProfile } = useAuth();
+  const year = new Date().getFullYear();
+
+  const [cycle, setCycle]               = useState<EvaluationCycle | null>(null);
+  const [completedGoals, setCompleted]  = useState<Goal[]>([]);
+  const [selfEval, setSelfEval]         = useState<SelfEvaluation | null>(null);
+  const [myEval, setMyEval]             = useState<IndividualEvaluation | null>(null);
+  const [goalEvals, setGoalEvals]       = useState<Record<string, { good: string; regret: string }>>({});
+  const [loading, setLoading]           = useState(true);
+  const [saving, setSaving]             = useState(false);
+
+  async function load() {
+    if (!userProfile) return;
+    setLoading(true);
+    try {
+      const [cyc, goals, se, ie] = await Promise.all([
+        getActiveCycle(),
+        getGoalsByUser(userProfile.id, year),
+        getSelfEvaluation(userProfile.id, year),
+        getIndividualEvaluation(userProfile.id, year),
+      ]);
+      setCycle(cyc);
+      const done = goals.filter(g => g.status === 'COMPLETED');
+      setCompleted(done);
+      setSelfEval(se);
+      setMyEval(ie);
+
+      if (se?.goalEvals?.length) {
+        const map: Record<string, { good: string; regret: string }> = {};
+        se.goalEvals.forEach(ge => { map[ge.goalId] = { good: ge.good, regret: ge.regret }; });
+        setGoalEvals(map);
+      } else {
+        const map: Record<string, { good: string; regret: string }> = {};
+        done.forEach(g => { map[g.id] = { good: '', regret: '' }; });
+        setGoalEvals(map);
+      }
+    } finally { setLoading(false); }
+  }
+
+  useEffect(() => { load(); }, [userProfile]);
+
+  const now = new Date();
+  const isInEvalPeriod = cycle
+    ? (now >= cycle.evalStartDate && now <= cycle.evalEndDate)
+    : false;
+  const isSubmitted = selfEval?.status === 'SUBMITTED';
+
+  async function handleSave() {
+    if (!userProfile) return;
+    setSaving(true);
+    try {
+      await upsertSelfEvaluation(userProfile.id, year, {
+        goalEvals: completedGoals.map(g => ({
+          goalId: g.id, goalTitle: g.title,
+          good: goalEvals[g.id]?.good ?? '',
+          regret: goalEvals[g.id]?.regret ?? '',
+        })),
+        status: 'DRAFT',
+      });
+      toast.success('임시 저장되었습니다.');
+      await load();
+    } finally { setSaving(false); }
+  }
+
+  async function handleSubmit() {
+    if (!userProfile) return;
+    setSaving(true);
+    try {
+      await upsertSelfEvaluation(userProfile.id, year, {
+        goalEvals: completedGoals.map(g => ({
+          goalId: g.id, goalTitle: g.title,
+          good: goalEvals[g.id]?.good ?? '',
+          regret: goalEvals[g.id]?.regret ?? '',
+        })),
+        status: 'SUBMITTED',
+        submittedAt: new Date(),
+      });
+      await upsertIndividualEvaluation(userProfile.id, year, {
+        organizationId: userProfile.organizationId,
+        status: 'SELF_SUBMITTED',
+      });
+      toast.success('팀장에게 제출되었습니다.');
+      await load();
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <Header title="내 업무 성과 평가" />
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+
+        {/* 평가 기간 배너 */}
+        {cycle && (
+          <div className={`rounded-xl border px-5 py-3.5 flex items-center gap-4 ${
+            isInEvalPeriod ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-gray-50'
+          }`}>
+            <div className="flex-1">
+              <p className={`text-xs font-semibold ${isInEvalPeriod ? 'text-blue-600' : 'text-gray-500'}`}>
+                {year}년 성과 평가 기간
+              </p>
+              <p className="text-sm text-gray-700 mt-0.5">
+                {cycle.evalStartDate.toLocaleDateString('ko-KR')} ~ {cycle.evalEndDate.toLocaleDateString('ko-KR')}
+                {isInEvalPeriod && <span className="ml-2 font-semibold text-blue-600">진행 중</span>}
+              </p>
+            </div>
+            {isSubmitted && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-green-700 bg-green-100 rounded-full px-3 py-1">
+                <CheckCircle2 className="h-3.5 w-3.5" /> 제출 완료
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* 현재 처리 상태 */}
+        {myEval && myEval.status !== 'NOT_STARTED' && (
+          <div className="rounded-xl border bg-white px-5 py-4">
+            <p className="text-xs text-gray-500 mb-1">평가 진행 상태</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {(['SELF_SUBMITTED', 'LEAD_REVIEWED', 'EXEC_CONFIRMED', 'PUBLISHED'] as const).map((s, i) => {
+                const statusIndex = ['SELF_SUBMITTED', 'LEAD_REVIEWED', 'EXEC_CONFIRMED', 'PUBLISHED'].indexOf(myEval.status);
+                const isDone = i <= statusIndex;
+                const labels = ['자기평가 제출', '팀장 검토 완료', '임원 등급 확정', '결과 공개'];
+                return (
+                  <span key={s} className={`rounded-full px-3 py-1 text-xs font-medium ${
+                    isDone ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'
+                  }`}>
+                    {i + 1}. {labels[i]}
+                  </span>
+                );
+              })}
+            </div>
+            {myEval.status === 'PUBLISHED' && myEval.execGrade && (
+              <div className="mt-3 flex items-center gap-3">
+                <span className="text-sm text-gray-600">최종 등급</span>
+                <span className={`rounded-full px-4 py-1.5 text-xl font-bold ${GRADE_COLOR[myEval.execGrade]}`}>
+                  {myEval.execGrade}
+                </span>
+                {myEval.execComment && (
+                  <p className="text-sm text-gray-500">{myEval.execComment}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 평가 기간 아님 */}
+        {!isInEvalPeriod && !isSubmitted && (
+          <div className="rounded-xl border border-dashed p-10 text-center space-y-2">
+            <Clock className="h-8 w-8 mx-auto text-gray-300" />
+            <p className="text-gray-500 font-medium">아직 평가 기간이 아닙니다.</p>
+            {cycle && (
+              <p className="text-sm text-gray-400">
+                {cycle.evalStartDate.toLocaleDateString('ko-KR')}부터 성과를 입력할 수 있습니다.
+              </p>
+            )}
+            {!cycle && (
+              <p className="text-sm text-gray-400">HR 관리자에게 평가 사이클 설정을 요청해주세요.</p>
+            )}
+          </div>
+        )}
+
+        {/* 제출 완료: 읽기 전용 */}
+        {isSubmitted && selfEval && (
+          <div className="space-y-3">
+            <h3 className="font-semibold text-gray-900">제출한 성과 내용</h3>
+            {selfEval.goalEvals.length === 0 ? (
+              <p className="text-sm text-gray-400 py-4">완료된 목표가 없었습니다.</p>
+            ) : (
+              selfEval.goalEvals.map(ge => (
+                <div key={ge.goalId} className="rounded-xl border bg-white p-5 space-y-3">
+                  <p className="font-medium text-gray-900">{ge.goalTitle}</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs font-semibold text-green-600 mb-1.5">잘된 점</p>
+                      <p className="text-sm text-gray-600 whitespace-pre-wrap">{ge.good || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-orange-500 mb-1.5">아쉬운 점</p>
+                      <p className="text-sm text-gray-600 whitespace-pre-wrap">{ge.regret || '—'}</p>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* 평가 입력 폼 */}
+        {(isInEvalPeriod || !cycle) && !isSubmitted && (
+          <div className="space-y-4">
+            <div>
+              <h3 className="font-semibold text-gray-900">완료된 업무 성과 입력</h3>
+              <p className="text-xs text-gray-500 mt-0.5">완료된 목표별로 잘된 점과 아쉬운 점을 입력하고 팀장에게 제출하세요.</p>
+            </div>
+
+            {loading ? <LoadingSpinner /> : completedGoals.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-10 text-center">
+                <AlertCircle className="h-7 w-7 mx-auto text-gray-300 mb-2" />
+                <p className="text-gray-400">완료된 목표가 없습니다.</p>
+                <p className="text-xs text-gray-400 mt-1">진행 중인 목표를 완료 처리 후 성과를 입력할 수 있습니다.</p>
+              </div>
+            ) : (
+              completedGoals.map(goal => (
+                <div key={goal.id} className="rounded-xl border bg-white p-5 space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-gray-900">{goal.title}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        기한: {goal.dueDate.toLocaleDateString('ko-KR')} · 진행률: {goal.progress}%
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700">완료</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-semibold text-green-600 block mb-1.5">잘된 점</label>
+                      <textarea
+                        value={goalEvals[goal.id]?.good ?? ''}
+                        onChange={e => setGoalEvals(p => ({ ...p, [goal.id]: { ...p[goal.id], good: e.target.value } }))}
+                        rows={3}
+                        placeholder="이 업무에서 잘된 점을 작성해주세요"
+                        className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-orange-500 block mb-1.5">아쉬운 점</label>
+                      <textarea
+                        value={goalEvals[goal.id]?.regret ?? ''}
+                        onChange={e => setGoalEvals(p => ({ ...p, [goal.id]: { ...p[goal.id], regret: e.target.value } }))}
+                        rows={3}
+                        placeholder="이 업무에서 아쉬운 점을 작성해주세요"
+                        className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+
+            {!loading && completedGoals.length > 0 && (
+              <div className="flex justify-end gap-3 pt-2">
+                <Button variant="outline" onClick={handleSave} disabled={saving}>임시 저장</Button>
+                <Button onClick={handleSubmit} disabled={saving}>
+                  {saving ? '제출 중...' : '팀장에게 제출'}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+// ─── 팀장: 팀원 검토 & 의견 제출 ──────────────────────────
+function TeamLeadEvalView() {
+  const { userProfile } = useAuth();
+  const year = new Date().getFullYear();
+
+  const [members, setMembers]         = useState<User[]>([]);
+  const [goalsByMember, setGoalsByMember] = useState<Record<string, Goal[]>>({});
+  const [selfEvals, setSelfEvals]     = useState<Record<string, SelfEvaluation>>({});
+  const [indivEvals, setIndivEvals]   = useState<Record<string, IndividualEvaluation>>({});
+  const [expanded, setExpanded]       = useState<Record<string, boolean>>({});
+  const [opinions, setOpinions]       = useState<Record<string, { grade: EvaluationGrade | ''; comment: string }>>({});
+  const [loading, setLoading]         = useState(true);
+  const [saving, setSaving]           = useState<string | null>(null);
+
+  async function load() {
+    if (!userProfile) return;
+    setLoading(true);
+    try {
+      const [memberList, allGoals, evalList] = await Promise.all([
+        getUsersByOrganization(userProfile.organizationId),
+        getGoalsByOrganization(userProfile.organizationId, year),
+        getIndividualEvaluationsByOrg(userProfile.organizationId, year),
+      ]);
+      const active = memberList.filter(u => u.role === 'MEMBER' && u.isActive);
+      setMembers(active);
+
+      const gMap: Record<string, Goal[]> = {};
+      active.forEach(m => { gMap[m.id] = allGoals.filter(g => g.userId === m.id); });
+      setGoalsByMember(gMap);
+
+      const seList = await getSelfEvaluationsByUsers(active.map(m => m.id), year);
+      const seMap: Record<string, SelfEvaluation> = {};
+      seList.forEach(se => { seMap[se.userId] = se; });
+      setSelfEvals(seMap);
+
+      const ieMap: Record<string, IndividualEvaluation> = {};
+      evalList.forEach(ie => { ieMap[ie.userId] = ie; });
+      setIndivEvals(ieMap);
+
+      const opMap: Record<string, { grade: EvaluationGrade | ''; comment: string }> = {};
+      active.forEach(m => {
+        const ie = ieMap[m.id];
+        opMap[m.id] = { grade: ie?.leadGrade ?? '', comment: ie?.leadComment ?? '' };
+      });
+      setOpinions(opMap);
+    } finally { setLoading(false); }
+  }
+
+  useEffect(() => { load(); }, [userProfile]);
+
+  async function handleSubmitOpinion(memberId: string) {
+    if (!userProfile) return;
+    const op = opinions[memberId];
+    if (!op?.grade) { toast.error('등급 의견을 선택해주세요.'); return; }
+
+    setSaving(memberId);
+    try {
+      const member = members.find(m => m.id === memberId);
+      await upsertIndividualEvaluation(memberId, year, {
+        organizationId: member?.organizationId ?? userProfile.organizationId,
+        leadGrade: op.grade as EvaluationGrade,
+        leadComment: op.comment,
+        leadSubmittedBy: userProfile.id,
+        leadSubmittedAt: new Date(),
+        status: 'LEAD_REVIEWED',
+      });
+      toast.success(`${member?.name ?? ''} 평가 의견을 제출했습니다.`);
+      await load();
+    } finally { setSaving(null); }
+  }
+
+  const goalCountSummary = (goals: Goal[]) => ({
+    total: goals.length,
+    completed: goals.filter(g => g.status === 'COMPLETED').length,
+    abandoned: goals.filter(g => g.status === 'ABANDONED').length,
+    inProgress: goals.filter(g => g.status === 'IN_PROGRESS').length,
+  });
+
+  return (
+    <div className="flex flex-col h-full">
+      <Header title="팀원 평가 의견 제출" />
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div>
+          <p className="text-sm text-gray-500">
+            팀원의 업무 성과와 자기평가를 검토한 후 등급 의견과 이유를 작성하고 제출하세요.
+          </p>
+        </div>
+
+        {loading ? <LoadingSpinner /> : members.length === 0 ? (
+          <div className="rounded-xl border border-dashed p-10 text-center text-gray-400">소속 팀원이 없습니다.</div>
+        ) : (
+          members.map(member => {
+            const ie = indivEvals[member.id];
+            const se = selfEvals[member.id];
+            const goals = goalsByMember[member.id] ?? [];
+            const summary = goalCountSummary(goals);
+            const isOpen = expanded[member.id] ?? false;
+            const isReviewed = ie?.status === 'LEAD_REVIEWED' || ie?.status === 'EXEC_CONFIRMED' || ie?.status === 'PUBLISHED';
+            const op = opinions[member.id] ?? { grade: '', comment: '' };
+
+            return (
+              <div key={member.id} className="rounded-xl border bg-white overflow-hidden">
+                {/* 헤더 */}
+                <button
+                  className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-gray-50 transition-colors"
+                  onClick={() => setExpanded(p => ({ ...p, [member.id]: !isOpen }))}
+                >
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <p className="font-semibold text-gray-900">{member.name}</p>
+                      <p className="text-xs text-gray-400">{member.position}</p>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <span>전체 {summary.total}</span>
+                      <span className="text-green-600 font-medium">완료 {summary.completed}</span>
+                      {summary.abandoned > 0 && <span className="text-gray-400">포기 {summary.abandoned}</span>}
+                      {summary.inProgress > 0 && <span className="text-indigo-500">진행중 {summary.inProgress}</span>}
+                    </div>
+                    {se?.status === 'SUBMITTED' ? (
+                      <span className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 rounded-full px-2.5 py-0.5 font-medium">
+                        <CheckCircle2 className="h-3 w-3" /> 자기평가 제출
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400 bg-gray-100 rounded-full px-2.5 py-0.5">자기평가 미제출</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {isReviewed && ie?.leadGrade && (
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${GRADE_COLOR[ie.leadGrade]}`}>
+                        의견 {ie.leadGrade}
+                      </span>
+                    )}
+                    {isOpen ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+                  </div>
+                </button>
+
+                {/* 펼친 내용 */}
+                {isOpen && (
+                  <div className="border-t px-5 py-5 space-y-5">
+                    {/* 목표 목록 */}
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 mb-2">업무 목록</p>
+                      {goals.length === 0 ? (
+                        <p className="text-sm text-gray-400">등록된 목표가 없습니다.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {goals.map(g => {
+                            const st = GOAL_STATUS_LABEL[g.status] ?? { label: g.status, color: 'bg-gray-100 text-gray-500' };
+                            return (
+                              <div key={g.id} className="flex items-center gap-3 rounded-lg bg-gray-50 px-3 py-2">
+                                <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${st.color}`}>{st.label}</span>
+                                <span className="text-sm text-gray-700 flex-1">{g.title}</span>
+                                <span className="text-xs text-gray-400">{g.progress}%</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 자기평가 내용 */}
+                    {se?.status === 'SUBMITTED' && se.goalEvals.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-500 mb-2">자기평가 (팀원 작성)</p>
+                        <div className="space-y-3">
+                          {se.goalEvals.map(ge => (
+                            <div key={ge.goalId} className="rounded-lg border bg-gray-50 p-4 space-y-2">
+                              <p className="text-sm font-medium text-gray-800">{ge.goalTitle}</p>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <p className="text-xs font-semibold text-green-600 mb-1">잘된 점</p>
+                                  <p className="text-sm text-gray-600 whitespace-pre-wrap">{ge.good || '—'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-semibold text-orange-500 mb-1">아쉬운 점</p>
+                                  <p className="text-sm text-gray-600 whitespace-pre-wrap">{ge.regret || '—'}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 등급 의견 입력 */}
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 space-y-3">
+                      <p className="text-xs font-semibold text-blue-700">팀장 등급 의견</p>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-2">등급 선택</p>
+                        <div className="flex gap-2">
+                          {GRADES.map(g => (
+                            <button
+                              key={g}
+                              disabled={isReviewed || saving === member.id}
+                              onClick={() => setOpinions(p => ({ ...p, [member.id]: { ...p[member.id], grade: g } }))}
+                              className={`w-10 h-10 rounded-lg text-sm font-bold border-2 transition-all ${
+                                op.grade === g
+                                  ? `${GRADE_COLOR[g]} border-current`
+                                  : 'bg-white border-gray-200 text-gray-400 hover:border-gray-400'
+                              } disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                              {g}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1.5">의견 (이유 작성)</p>
+                        <textarea
+                          value={op.comment}
+                          onChange={e => setOpinions(p => ({ ...p, [member.id]: { ...p[member.id], comment: e.target.value } }))}
+                          disabled={isReviewed || saving === member.id}
+                          rows={2}
+                          placeholder="등급 의견의 이유를 작성해주세요"
+                          className="w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                        />
+                      </div>
+                      <div className="flex justify-end">
+                        {isReviewed ? (
+                          <span className="text-xs text-green-600 font-medium">제출 완료</span>
+                        ) : (
+                          <Button
+                            size="sm"
+                            disabled={saving === member.id || !op.grade}
+                            onClick={() => handleSubmitOpinion(member.id)}
+                          >
+                            {saving === member.id ? '제출 중...' : '의견 제출'}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── 임원: 최종 등급 확정 ────────────────────────────────
+function ExecutiveEvalView() {
+  const { userProfile } = useAuth();
+  const year = new Date().getFullYear();
+
+  const [allOrgs, setAllOrgs]         = useState<Organization[]>([]);
+  const [members, setMembers]         = useState<User[]>([]);
+  const [selfEvals, setSelfEvals]     = useState<Record<string, SelfEvaluation>>({});
+  const [indivEvals, setIndivEvals]   = useState<Record<string, IndividualEvaluation>>({});
+  const [quotas, setQuotas]           = useState<DivisionGradeQuota | null>(null);
+  const [confirmInputs, setConfirm]   = useState<Record<string, { grade: EvaluationGrade | ''; comment: string }>>({});
+  const [expanded, setExpanded]       = useState<Record<string, boolean>>({});
+  const [loading, setLoading]         = useState(true);
+  const [saving, setSaving]           = useState<string | null>(null);
+
+  async function load() {
+    if (!userProfile) return;
+    setLoading(true);
+    try {
+      const [orgs, allUsers, allQuotas] = await Promise.all([
+        getOrganizations(),
+        getAllUsers(),
+        getAllDivisionGradeQuotas(year),
+      ]);
+      setAllOrgs(orgs);
+
+      const descIds = getDescendantOrgIds(userProfile.organizationId, orgs);
+      const active = allUsers.filter(u => u.role === 'MEMBER' && u.isActive && descIds.includes(u.organizationId));
+      setMembers(active);
+
+      const evalResults = await Promise.all(
+        descIds.map(oid => getIndividualEvaluationsByOrg(oid, year))
+      );
+      const ieMap: Record<string, IndividualEvaluation> = {};
+      evalResults.flat().forEach(ie => { ieMap[ie.userId] = ie; });
+      setIndivEvals(ieMap);
+
+      const seList = await getSelfEvaluationsByUsers(active.map(m => m.id), year);
+      const seMap: Record<string, SelfEvaluation> = {};
+      seList.forEach(se => { seMap[se.userId] = se; });
+      setSelfEvals(seMap);
+
+      // 내 부문 쿼터 (CONFIRMED 된 것만)
+      const myQuota = allQuotas.find(q =>
+        q.organizationId === userProfile.organizationId && q.status === 'CONFIRMED'
+      );
+      setQuotas(myQuota ?? null);
+
+      const cinMap: Record<string, { grade: EvaluationGrade | ''; comment: string }> = {};
+      active.forEach(m => {
+        const ie = ieMap[m.id];
+        cinMap[m.id] = { grade: ie?.execGrade ?? '', comment: ie?.execComment ?? '' };
+      });
+      setConfirm(cinMap);
+    } finally { setLoading(false); }
+  }
+
+  useEffect(() => { load(); }, [userProfile]);
+
+  function getUsed(grade: EvaluationGrade): number {
+    return Object.values(indivEvals).filter(ie =>
+      members.some(m => m.id === ie.userId) && ie.execGrade === grade
+    ).length;
+  }
+
+  function getQuotaCount(grade: EvaluationGrade): number {
+    if (!quotas) return 999;
+    return quotas[`quota${grade}` as keyof DivisionGradeQuota] as number ?? 0;
+  }
+
+  function getRemaining(grade: EvaluationGrade): number {
+    return getQuotaCount(grade) - getUsed(grade);
+  }
+
+  async function handleConfirm(memberId: string) {
+    if (!userProfile) return;
+    const input = confirmInputs[memberId];
+    if (!input?.grade) { toast.error('등급을 선택해주세요.'); return; }
+
+    setSaving(memberId);
+    try {
+      const member = members.find(m => m.id === memberId);
+      await upsertIndividualEvaluation(memberId, year, {
+        execGrade: input.grade as EvaluationGrade,
+        execComment: input.comment,
+        execConfirmedBy: userProfile.id,
+        execConfirmedAt: new Date(),
+        status: 'EXEC_CONFIRMED',
+      });
+      toast.success(`${member?.name ?? ''} 등급을 확정했습니다.`);
+      await load();
+    } finally { setSaving(null); }
+  }
+
+  const membersByOrg = members.reduce<Record<string, User[]>>((acc, m) => {
+    if (!acc[m.organizationId]) acc[m.organizationId] = [];
+    acc[m.organizationId].push(m);
+    return acc;
+  }, {});
+
+  const orgNameMap = Object.fromEntries(allOrgs.map(o => [o.id, o.name]));
+
+  return (
+    <div className="flex flex-col h-full">
+      <Header title="평가 등급 확정" />
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+
+        {/* 쿼터 현황 */}
+        {quotas ? (
+          <div className="rounded-xl border bg-white px-5 py-4 space-y-2">
+            <p className="text-xs font-semibold text-gray-500">
+              {year}년 부문 등급 쿼터 (조직 {quotas.orgGrade}등급 · 총 {quotas.totalMembers}명)
+            </p>
+            <div className="flex gap-3 flex-wrap">
+              {GRADES.map(g => {
+                const quota = getQuotaCount(g);
+                const used = getUsed(g);
+                const remaining = quota - used;
+                return (
+                  <div key={g} className={`rounded-lg border px-4 py-2.5 text-center min-w-[80px] ${
+                    remaining <= 0 && quota > 0 ? 'border-red-200 bg-red-50' : 'border-gray-200'
+                  }`}>
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-bold mb-1 ${GRADE_COLOR[g]}`}>{g}</span>
+                    <p className="text-lg font-bold text-gray-900">{quota}<span className="text-xs font-normal text-gray-400">명</span></p>
+                    <p className="text-xs text-gray-400">잔여 <span className={remaining <= 0 && quota > 0 ? 'text-red-500 font-medium' : 'text-gray-600'}>{remaining}</span></p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-orange-200 bg-orange-50 px-5 py-3.5 flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-orange-400 shrink-0" />
+            <p className="text-sm text-orange-700">HR 관리자가 등급 쿼터를 확정한 후 개인 등급을 부여할 수 있습니다.</p>
+          </div>
+        )}
+
+        {/* 팀원 목록 */}
+        {loading ? <LoadingSpinner /> : members.length === 0 ? (
+          <div className="rounded-xl border border-dashed p-10 text-center text-gray-400">산하 팀원이 없습니다.</div>
+        ) : (
+          Object.entries(membersByOrg).map(([orgId, orgMembers]) => (
+            <div key={orgId} className="space-y-2">
+              <p className="text-xs font-semibold text-gray-400 px-1">{orgNameMap[orgId] ?? orgId}</p>
+              {orgMembers.map(member => {
+                const ie = indivEvals[member.id];
+                const se = selfEvals[member.id];
+                const isConfirmed = ie?.status === 'EXEC_CONFIRMED' || ie?.status === 'PUBLISHED';
+                const input = confirmInputs[member.id] ?? { grade: '', comment: '' };
+                const isOpen = expanded[member.id] ?? false;
+
+                return (
+                  <div key={member.id} className="rounded-xl border bg-white overflow-hidden">
+                    {/* 헤더 */}
+                    <button
+                      className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-gray-50 transition-colors"
+                      onClick={() => setExpanded(p => ({ ...p, [member.id]: !isOpen }))}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div>
+                          <p className="font-medium text-gray-900">{member.name}</p>
+                          <p className="text-xs text-gray-400">{member.position}</p>
+                        </div>
+                        {ie?.leadGrade && (
+                          <span className={`text-xs rounded-full px-2.5 py-0.5 font-medium ${GRADE_COLOR[ie.leadGrade]}`}>
+                            팀장 의견 {ie.leadGrade}
+                          </span>
+                        )}
+                        {!ie?.leadGrade && (
+                          <span className="text-xs text-gray-400 bg-gray-100 rounded-full px-2.5 py-0.5">팀장 의견 없음</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {isConfirmed && ie.execGrade && (
+                          <span className={`rounded-full px-3 py-0.5 text-sm font-bold ${GRADE_COLOR[ie.execGrade]}`}>
+                            확정 {ie.execGrade}
+                          </span>
+                        )}
+                        {isOpen ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+                      </div>
+                    </button>
+
+                    {/* 펼친 내용 */}
+                    {isOpen && (
+                      <div className="border-t px-5 py-5 space-y-4">
+                        {/* 자기평가 요약 */}
+                        {se?.status === 'SUBMITTED' && se.goalEvals.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500 mb-2">자기평가 내용</p>
+                            <div className="space-y-2">
+                              {se.goalEvals.map(ge => (
+                                <div key={ge.goalId} className="rounded-lg bg-gray-50 p-3">
+                                  <p className="text-xs font-medium text-gray-700 mb-1.5">{ge.goalTitle}</p>
+                                  <div className="grid grid-cols-2 gap-3 text-xs text-gray-500">
+                                    <div><span className="font-semibold text-green-600">잘된 점: </span>{ge.good || '—'}</div>
+                                    <div><span className="font-semibold text-orange-500">아쉬운 점: </span>{ge.regret || '—'}</div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 팀장 의견 */}
+                        {ie?.leadGrade && (
+                          <div className="rounded-lg bg-gray-50 px-4 py-3">
+                            <p className="text-xs font-semibold text-gray-500 mb-1">팀장 의견</p>
+                            <div className="flex items-center gap-2">
+                              <span className={`rounded-full px-2.5 py-0.5 text-sm font-bold ${GRADE_COLOR[ie.leadGrade]}`}>{ie.leadGrade}</span>
+                              {ie.leadComment && <p className="text-sm text-gray-600">{ie.leadComment}</p>}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 등급 확정 입력 */}
+                        <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4 space-y-3">
+                          <p className="text-xs font-semibold text-indigo-700">임원 등급 확정</p>
+                          <div>
+                            <p className="text-xs text-gray-500 mb-2">등급 선택</p>
+                            <div className="flex gap-2">
+                              {GRADES.map(g => {
+                                const remaining = getRemaining(g);
+                                const isSelected = input.grade === g;
+                                const isFull = !isSelected && remaining <= 0 && quotas !== null;
+                                return (
+                                  <div key={g} className="text-center">
+                                    <button
+                                      disabled={isConfirmed || saving === member.id || isFull}
+                                      onClick={() => setConfirm(p => ({ ...p, [member.id]: { ...p[member.id], grade: g } }))}
+                                      className={`w-10 h-10 rounded-lg text-sm font-bold border-2 transition-all ${
+                                        isSelected
+                                          ? `${GRADE_COLOR[g]} border-current`
+                                          : isFull
+                                            ? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+                                            : 'bg-white border-gray-200 text-gray-400 hover:border-gray-400'
+                                      } disabled:opacity-50`}
+                                    >
+                                      {g}
+                                    </button>
+                                    {quotas && (
+                                      <p className={`text-[10px] mt-0.5 ${remaining <= 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                                        잔여{remaining}
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1.5">의견</p>
+                            <textarea
+                              value={input.comment}
+                              onChange={e => setConfirm(p => ({ ...p, [member.id]: { ...p[member.id], comment: e.target.value } }))}
+                              disabled={isConfirmed || saving === member.id}
+                              rows={2}
+                              placeholder="등급 부여 이유 또는 의견을 작성해주세요"
+                              className="w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-50"
+                            />
+                          </div>
+                          <div className="flex justify-end">
+                            {isConfirmed ? (
+                              <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                                <CheckCircle2 className="h-3.5 w-3.5" /> 확정 완료
+                              </span>
+                            ) : (
+                              <Button
+                                size="sm"
+                                disabled={saving === member.id || !input.grade}
+                                onClick={() => handleConfirm(member.id)}
+                              >
+                                {saving === member.id ? '확정 중...' : '등급 확정'}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}

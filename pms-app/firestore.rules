@@ -1,0 +1,150 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 로그인한 사용자만 접근 가능
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // 본인 여부
+    function isOwner(uid) {
+      return request.auth.uid == uid;
+    }
+
+    // 역할 조회 (users 컬렉션에서)
+    function getRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isHrAdmin() { return getRole() == 'HR_ADMIN'; }
+    function isCeo()     { return getRole() == 'CEO'; }
+    function isExec()    { return getRole() == 'EXECUTIVE'; }
+    function isLead()    { return getRole() == 'TEAM_LEAD'; }
+    function isMember()  { return getRole() == 'MEMBER'; }
+
+    // 사용자
+    match /users/{uid} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(uid) || isHrAdmin() || isCeo();
+    }
+
+    // 조직
+    match /organizations/{orgId} {
+      allow read: if isAuthenticated();
+      allow write: if isHrAdmin() || isCeo();
+    }
+
+    // 목표
+    match /goals/{goalId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isLead() || isExec() || isCeo() || isHrAdmin()
+      );
+    }
+
+    // 목표 이력 (읽기 전용)
+    match /goalHistories/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+    }
+
+    // 진행상황
+    match /progressUpdates/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId == request.auth.uid;
+    }
+
+    // 1on1
+    match /oneOnOnes/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (
+        resource == null ||
+        resource.data.leaderId == request.auth.uid ||
+        resource.data.memberId == request.auth.uid
+      );
+    }
+
+    // 조직 평가
+    match /orgEvaluations/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isHrAdmin() || isCeo();
+    }
+
+    // 개인 평가 (내부 구성원 모두 읽기 허용 - 팀장/임원/HR이 상호 조회 필요)
+    match /individualEvaluations/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (
+        (resource == null && request.resource.data.userId == request.auth.uid) ||
+        (resource != null && resource.data.userId == request.auth.uid) ||
+        isLead() || isExec() || isCeo() || isHrAdmin()
+      );
+    }
+
+    // 자기평가 (docId = userId_year 형태)
+    match /selfEvaluations/{docId} {
+      allow read: if isAuthenticated() && (
+        docId.matches('^' + request.auth.uid + '_.*') ||
+        isLead() || isExec() || isCeo() || isHrAdmin()
+      );
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // 평가 사이클
+    match /evaluationCycles/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isHrAdmin();
+    }
+
+    // 등급 쿼터
+    match /gradeQuotas/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isHrAdmin();
+    }
+
+    // 연간 목표 (회사/조직)
+    match /annualGoals/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isHrAdmin();
+    }
+
+    // 마일리지
+    match /mileages/{userId} {
+      allow read: if isAuthenticated() && (
+        isOwner(userId) || isHrAdmin() || isCeo()
+      );
+      allow write: if isHrAdmin() || isCeo();
+    }
+
+    // 1on1 Q&A 서브컬렉션
+    match /oneOnOnes/{id}/questions/{qId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+    }
+
+    // 부문/공장 등급 변경 이력
+    match /orgGradeHistories/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isCeo();
+    }
+
+    // 부문/공장별 개인 등급 쿼터
+    match /divisionGradeQuotas/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isHrAdmin() || isCeo();
+    }
+
+    // 초대 토큰 (토큰을 아는 사람만 읽기 가능 - UUID가 보안 역할)
+    match /invitations/{token} {
+      allow read: if true;
+      allow create: if isHrAdmin() || isCeo();
+      allow update: if true; // 초대 수락 시 usedAt 업데이트
+    }
+  }
+}

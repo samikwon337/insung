@@ -1,0 +1,307 @@
+// ─────────────────────────────────────────────
+// 사용자 역할
+// ─────────────────────────────────────────────
+export type UserRole =
+  | 'MEMBER'       // 일반 팀원
+  | 'TEAM_LEAD'    // 팀장
+  | 'EXECUTIVE'    // 조직담당 임원
+  | 'CEO'          // 최고관리자
+  | 'HR_ADMIN';    // HR관리자
+
+// ─────────────────────────────────────────────
+// 조직
+// ─────────────────────────────────────────────
+export interface Organization {
+  id: string;
+  name: string;
+  type: 'COMPANY' | 'DIVISION' | 'HEADQUARTERS' | 'TEAM';
+  parentId: string | null;
+  leaderId: string | null;   // 팀장 또는 임원 userId
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 사용자
+// ─────────────────────────────────────────────
+export interface User {
+  id: string;               // Firebase Auth UID
+  email: string;
+  name: string;
+  role: UserRole;
+  organizationId: string;   // 소속 팀/부문 ID
+  position?: string;        // 직책
+  photoURL?: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 목표 상태
+// ─────────────────────────────────────────────
+export type GoalStatus =
+  | 'DRAFT'             // 초안 (팀원 작성 중)
+  | 'PENDING_APPROVAL'  // 승인 요청 (팀원→팀장, 팀장→임원)
+  | 'LEAD_APPROVED'     // 팀장 1차 승인 완료 (임원 최종 승인 대기) — 팀원 목표만
+  | 'APPROVED'          // 최종 승인됨 (확정)
+  | 'REJECTED'          // 반려
+  | 'IN_PROGRESS'       // 진행 중
+  | 'COMPLETED'         // 완료 요청
+  | 'PENDING_ABANDON'   // 포기 요청
+  | 'ABANDONED';        // 포기됨
+
+// ─────────────────────────────────────────────
+// 목표
+// ─────────────────────────────────────────────
+export interface Goal {
+  id: string;
+  userId: string;
+  organizationId: string;
+  cycleYear: number;            // 평가 연도 (e.g. 2026)
+
+  title: string;                // 목표명
+  description: string;          // 세부추진내용
+  dueDate: Date;                // 추진기한
+  weight: number;               // 가중치 (%)
+
+  status: GoalStatus;
+  progress: number;             // 진행률 0~100
+
+  leadApprovedBy?: string;      // 팀장 1차 승인자 (팀원 목표 전용)
+  leadApprovedAt?: Date;
+  approvedBy?: string;          // 최종 승인자 (임원 또는 팀장→임원 구조)
+  approvedAt?: Date;
+  rejectedReason?: string;
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 목표 이력 (변경 로그)
+// ─────────────────────────────────────────────
+export interface GoalHistory {
+  id: string;
+  goalId: string;
+  changedBy: string;            // userId
+  changeType: 'CREATED' | 'UPDATED' | 'STATUS_CHANGED' | 'APPROVED' | 'REJECTED';
+  previousStatus?: GoalStatus;
+  newStatus?: GoalStatus;
+  comment?: string;
+  createdAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 진행상황 업데이트
+// ─────────────────────────────────────────────
+export interface ProgressUpdate {
+  id: string;
+  goalId: string;
+  userId: string;
+  progress: number;   // 0~100
+  comment: string;
+  createdAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 1on1 (채팅 Q&A 형식)
+// ─────────────────────────────────────────────
+export interface OneOnOne {
+  id: string;
+  leaderId: string;              // 팀장 userId
+  memberId: string;              // 팀원 userId
+  organizationId: string;
+  title?: string;                // 대화 주제 (선택)
+  lastMessageAt?: Date;          // 마지막 메시지 시각 (목록 정렬용)
+  lastMessagePreview?: string;   // 마지막 메시지 미리보기
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface OneOnOneQuestion {
+  id: string;
+  askerId: string;       // 질문자 (팀원 또는 팀장)
+  question: string;      // 질문 내용
+  answer?: string;       // 답변 내용
+  answeredBy?: string;   // 답변자 userId
+  answeredAt?: Date;
+  createdAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 평가 등급
+// ─────────────────────────────────────────────
+export type EvaluationGrade = 'A' | 'B' | 'C' | 'D' | 'E';
+
+// ─────────────────────────────────────────────
+// 자기평가 (팀원이 완료된 목표별 작성)
+// ─────────────────────────────────────────────
+export interface SelfEvalGoalEntry {
+  goalId: string;
+  goalTitle: string;
+  good: string;     // 잘된 점
+  regret: string;   // 아쉬운 점
+}
+
+export type SelfEvalStatus = 'DRAFT' | 'SUBMITTED';
+
+export interface SelfEvaluation {
+  id: string;               // `${userId}_${year}`
+  userId: string;
+  cycleYear: number;
+  goalEvals: SelfEvalGoalEntry[];
+  status: SelfEvalStatus;
+  submittedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 조직 평가 결과 (CEO 지정)
+// ─────────────────────────────────────────────
+export interface OrganizationEvaluation {
+  id: string;
+  organizationId: string;
+  cycleYear: number;
+  grade: EvaluationGrade;
+  uploadedBy: string;       // CEO userId
+  approvedBy?: string;
+  approvedAt?: Date;
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED';
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 개인 인사평가 쿼터 설정 (조직등급 → 개인등급 비율)
+// ─────────────────────────────────────────────
+export interface GradeQuota {
+  orgGrade: EvaluationGrade;
+  memberGrade: EvaluationGrade;
+  count: number;
+}
+
+// ─────────────────────────────────────────────
+// 개인 인사평가
+// 흐름: NOT_STARTED → SELF_SUBMITTED → LEAD_REVIEWED → EXEC_CONFIRMED → PUBLISHED
+// ─────────────────────────────────────────────
+export type IndividualEvalStatus =
+  | 'NOT_STARTED'
+  | 'SELF_SUBMITTED'    // 팀원 자기평가 제출
+  | 'LEAD_REVIEWED'     // 팀장 의견 제출
+  | 'EXEC_CONFIRMED'    // 임원 등급 확정
+  | 'PUBLISHED';        // 팀원 공개
+
+export interface IndividualEvaluation {
+  id: string;
+  userId: string;
+  organizationId: string;
+  cycleYear: number;
+
+  leadGrade?: EvaluationGrade;     // 팀장 의견 등급
+  leadComment?: string;            // 팀장 의견 내용
+  leadSubmittedBy?: string;        // 팀장 userId
+  leadSubmittedAt?: Date;
+
+  execGrade?: EvaluationGrade;     // 임원 확정 등급
+  execComment?: string;            // 임원 의견
+  execConfirmedBy?: string;        // 임원 userId
+  execConfirmedAt?: Date;
+
+  status: IndividualEvalStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 연간 목표 (회사 / 조직)
+// ─────────────────────────────────────────────
+export interface AnnualGoal {
+  id: string;
+  type: 'company' | 'org';
+  year: number;
+  organizationId?: string;   // org 타입일 때만
+  content: string;
+  updatedBy: string;
+  updatedAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 마일리지 (임원 제외)
+// ─────────────────────────────────────────────
+export interface Mileage {
+  id: string;          // userId와 동일 (document ID)
+  userId: string;
+  organizationId: string;
+  points: number;
+  memo?: string;       // HR관리자 메모
+  updatedBy: string;   // HR관리자 userId
+  updatedAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 사용자 초대
+// ─────────────────────────────────────────────
+export interface Invitation {
+  id: string;          // 초대 토큰 (document ID)
+  userId: string;      // 대상 사용자 Firestore ID (Firebase Auth UID, 초대 수락 전은 빈 문자열)
+  email: string;
+  name: string;
+  role: UserRole;
+  organizationId?: string;
+  position?: string;
+  expiresAt: Date;
+  usedAt?: Date;
+  createdBy: string;   // HR관리자 userId
+  createdAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 부문/공장 등급 변경 이력 (CEO가 등급 변경할 때마다 기록)
+// ─────────────────────────────────────────────
+export interface OrgGradeHistory {
+  id: string;
+  organizationId: string;       // DIVISION 또는 HEADQUARTERS id
+  cycleYear: number;
+  grade: EvaluationGrade;
+  previousGrade?: EvaluationGrade;
+  assignedBy: string;           // CEO userId
+  comment?: string;
+  createdAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 부문/공장별 개인 등급 쿼터 (HR_ADMIN 확정)
+// ─────────────────────────────────────────────
+export interface DivisionGradeQuota {
+  id: string;                   // `${orgId}_${year}`
+  organizationId: string;
+  cycleYear: number;
+  orgGrade: EvaluationGrade;    // 확정 시점의 조직 등급 스냅샷
+  totalMembers: number;         // 확정 시점의 산하 전체 팀원 수
+  quotaA: number;
+  quotaB: number;
+  quotaC: number;
+  quotaD: number;
+  quotaE: number;
+  status: 'DRAFT' | 'CONFIRMED';
+  confirmedBy?: string;         // HR_ADMIN userId
+  confirmedAt?: Date;
+  updatedBy: string;
+  updatedAt: Date;
+}
+
+// ─────────────────────────────────────────────
+// 평가 사이클
+// ─────────────────────────────────────────────
+export interface EvaluationCycle {
+  id: string;
+  year: number;
+  goalStartDate: Date;    // 목표 수립 시작
+  goalEndDate: Date;      // 목표 수립 마감
+  evalStartDate: Date;    // 평가 시작
+  evalEndDate: Date;      // 평가 마감
+  isActive: boolean;
+  createdAt: Date;
+}
