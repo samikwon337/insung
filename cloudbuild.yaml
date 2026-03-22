@@ -33,6 +33,7 @@ steps:
           --build-arg NEXT_PUBLIC_FIREBASE_APP_ID=$$FIREBASE_APP_ID \
           -t ${_IMAGE}:$SHORT_SHA \
           -t ${_IMAGE}:latest \
+          -f pms-app/Dockerfile \
           pms-app/
     secretEnv:
       - FIREBASE_API_KEY
