@@ -69,7 +69,8 @@ export default function ProgressPage() {
 
   useEffect(() => {
     if (!userProfile) return;
-    const role = userProfile.role;
+    const profile = userProfile;
+    const role = profile.role;
     const treeRole = ['TEAM_LEAD', 'HR_ADMIN'].includes(role);
     async function load() {
       try {
@@ -78,7 +79,7 @@ export default function ProgressPage() {
             getAllUsers(), getOrganizations(), getAllGoalsByYear(year),
           ]);
           const scopeOrgIds = role === 'TEAM_LEAD'
-            ? findDescendantIds(userProfile.organizationId, allOrgs)
+            ? findDescendantIds(profile.organizationId, allOrgs)
             : allOrgs.map(o => o.id);
 
           const scopeUsers = allUsers.filter(u => scopeOrgIds.includes(u.organizationId));
@@ -97,7 +98,7 @@ export default function ProgressPage() {
           const scopeOrgs = allOrgs.filter(o => scopeOrgIds.includes(o.id));
           setTreeNodes(buildTree(null, scopeOrgs, usersByOrg, goalsByUser));
         } else {
-          setMyGoals(await getGoalsByUser(userProfile.id, year));
+          setMyGoals(await getGoalsByUser(profile.id, year));
         }
       } catch (e: any) {
         console.error('진행현황 로드 실패:', e);
