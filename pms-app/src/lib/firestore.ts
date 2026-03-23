@@ -156,10 +156,9 @@ export async function updateGoal(id: string, data: Partial<Goal>) {
 export async function getGoalsByUser(userId: string, year?: number): Promise<Goal[]> {
   const constraints: QueryConstraint[] = [where('userId', '==', userId)];
   if (year) constraints.push(where('cycleYear', '==', year));
-  constraints.push(orderBy('createdAt', 'desc'));
-
+  // orderBy 제거 → 복합 인덱스 불필요, 메모리 정렬로 대체
   const snap = await getDocs(query(collection(db, COLLECTIONS.GOALS), ...constraints));
-  return snap.docs.map(d => ({
+  const goals = snap.docs.map(d => ({
     ...d.data(),
     id: d.id,
     dueDate: fromTimestamp(d.data().dueDate) ?? new Date(),
@@ -167,30 +166,29 @@ export async function getGoalsByUser(userId: string, year?: number): Promise<Goa
     updatedAt: fromTimestamp(d.data().updatedAt) ?? new Date(),
     approvedAt: fromTimestamp(d.data().approvedAt),
   } as Goal));
+  return goals.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 export async function getAllGoalsByYear(year: number): Promise<Goal[]> {
   const snap = await getDocs(query(
     collection(db, COLLECTIONS.GOALS),
     where('cycleYear', '==', year),
-    orderBy('createdAt', 'asc')
   ));
-  return snap.docs.map(d => ({
+  const goals = snap.docs.map(d => ({
     ...d.data(), id: d.id,
     dueDate: fromTimestamp(d.data().dueDate) ?? new Date(),
     createdAt: fromTimestamp(d.data().createdAt) ?? new Date(),
     updatedAt: fromTimestamp(d.data().updatedAt) ?? new Date(),
     approvedAt: fromTimestamp(d.data().approvedAt),
   } as Goal));
+  return goals.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 }
 
 export async function getGoalsByOrganization(orgId: string, year?: number): Promise<Goal[]> {
   const constraints: QueryConstraint[] = [where('organizationId', '==', orgId)];
   if (year) constraints.push(where('cycleYear', '==', year));
-  constraints.push(orderBy('createdAt', 'desc'));
-
   const snap = await getDocs(query(collection(db, COLLECTIONS.GOALS), ...constraints));
-  return snap.docs.map(d => ({
+  const goals = snap.docs.map(d => ({
     ...d.data(),
     id: d.id,
     dueDate: fromTimestamp(d.data().dueDate) ?? new Date(),
@@ -198,6 +196,7 @@ export async function getGoalsByOrganization(orgId: string, year?: number): Prom
     updatedAt: fromTimestamp(d.data().updatedAt) ?? new Date(),
     approvedAt: fromTimestamp(d.data().approvedAt),
   } as Goal));
+  return goals.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 // 팀장: 승인 대기 목표 조회
@@ -230,7 +229,6 @@ export async function getPendingGoalsByOrganizations(orgIds: string[]): Promise<
       collection(db, COLLECTIONS.GOALS),
       where('organizationId', 'in', chunk),
       where('status', 'in', ['PENDING_APPROVAL', 'LEAD_APPROVED', 'PENDING_ABANDON', 'COMPLETED']),
-      orderBy('createdAt', 'asc')
     ));
     results.push(...snap.docs.map(d => {
       const data = d.data();
@@ -244,7 +242,7 @@ export async function getPendingGoalsByOrganizations(orgIds: string[]): Promise<
       } as Goal;
     }));
   }
-  return results;
+  return results.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 }
 
 // ─── 목표 이력 ────────────────────────────────
@@ -259,13 +257,13 @@ export async function getGoalHistories(goalId: string): Promise<GoalHistory[]> {
   const snap = await getDocs(query(
     collection(db, COLLECTIONS.GOAL_HISTORIES),
     where('goalId', '==', goalId),
-    orderBy('createdAt', 'asc')
   ));
-  return snap.docs.map(d => ({
+  const items = snap.docs.map(d => ({
     ...d.data(),
     id: d.id,
     createdAt: fromTimestamp(d.data().createdAt) ?? new Date(),
   } as GoalHistory));
+  return items.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 }
 
 // ─── 진행상황 ──────────────────────────────────
@@ -281,13 +279,13 @@ export async function getProgressUpdates(goalId: string): Promise<ProgressUpdate
   const snap = await getDocs(query(
     collection(db, COLLECTIONS.PROGRESS_UPDATES),
     where('goalId', '==', goalId),
-    orderBy('createdAt', 'desc')
   ));
-  return snap.docs.map(d => ({
+  const items = snap.docs.map(d => ({
     ...d.data(),
     id: d.id,
     createdAt: fromTimestamp(d.data().createdAt) ?? new Date(),
   } as ProgressUpdate));
+  return items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 // ─── 자기평가 (SelfEvaluation) ────────────────
