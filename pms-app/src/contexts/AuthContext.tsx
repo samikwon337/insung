@@ -33,6 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthChange(async (fbUser) => {
       if (fbUser) {
         const profile = await getUser(fbUser.uid);
+        // 레거시 호환: role이 'HR_ADMIN'인 경우 → MEMBER + isHrAdmin: true로 변환
+        if (profile && (profile.role as string) === 'HR_ADMIN') {
+          profile.role = 'MEMBER';
+          profile.isHrAdmin = true;
+        }
         setFirebaseUser(fbUser);
         setUserProfile(profile);
       } else {
