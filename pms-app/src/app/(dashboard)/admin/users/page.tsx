@@ -26,14 +26,11 @@ const ROLES: { value: UserRole; label: string }[] = [
   { value: 'TEAM_LEAD', label: '팀장' },
   { value: 'EXECUTIVE', label: '임원' },
   { value: 'CEO',       label: '최고관리자' },
-  { value: 'HR_ADMIN',  label: 'HR관리자' },
 ];
 
 const ROLE_LABEL: Record<string, UserRole> = {
-  '팀원': 'MEMBER', '팀장': 'TEAM_LEAD', '임원': 'EXECUTIVE',
-  '최고관리자': 'CEO', 'HR관리자': 'HR_ADMIN',
-  'MEMBER': 'MEMBER', 'TEAM_LEAD': 'TEAM_LEAD', 'EXECUTIVE': 'EXECUTIVE',
-  'CEO': 'CEO', 'HR_ADMIN': 'HR_ADMIN',
+  '팀원': 'MEMBER', '팀장': 'TEAM_LEAD', '임원': 'EXECUTIVE', '최고관리자': 'CEO',
+  'MEMBER': 'MEMBER', 'TEAM_LEAD': 'TEAM_LEAD', 'EXECUTIVE': 'EXECUTIVE', 'CEO': 'CEO',
 };
 
 const ROLE_COLOR: Record<UserRole, string> = {
@@ -41,12 +38,11 @@ const ROLE_COLOR: Record<UserRole, string> = {
   TEAM_LEAD: 'bg-green-100 text-green-700',
   EXECUTIVE: 'bg-purple-100 text-purple-700',
   CEO:       'bg-blue-100 text-blue-700',
-  HR_ADMIN:  'bg-orange-100 text-orange-700',
 };
 
 export default function UsersPage() {
   return (
-    <AuthGuard allowedRoles={['HR_ADMIN', 'CEO']}>
+    <AuthGuard allowedRoles={['CEO']} requireHrAdmin>
       <UsersContent />
     </AuthGuard>
   );
@@ -60,7 +56,7 @@ function UsersContent() {
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
-  const [form, setForm] = useState({ name: '', email: '', role: 'MEMBER' as UserRole, organizationId: '', position: '' });
+  const [form, setForm] = useState({ name: '', email: '', role: 'MEMBER' as UserRole, organizationId: '', position: '', isHrAdmin: false });
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -213,13 +209,13 @@ function UsersContent() {
   // ── 단건 저장 ─────────────────────────────────
   function openNew() {
     setEditing(null);
-    setForm({ name: '', email: '', role: 'MEMBER', organizationId: '', position: '' });
+    setForm({ name: '', email: '', role: 'MEMBER', organizationId: '', position: '', isHrAdmin: false });
     setShowDialog(true);
   }
 
   function openEdit(user: User) {
     setEditing(user);
-    setForm({ name: user.name, email: user.email, role: user.role, organizationId: user.organizationId, position: user.position ?? '' });
+    setForm({ name: user.name, email: user.email, role: user.role, organizationId: user.organizationId, position: user.position ?? '', isHrAdmin: !!user.isHrAdmin });
     setShowDialog(true);
   }
 
@@ -233,6 +229,7 @@ function UsersContent() {
           name: form.name, role: form.role,
           organizationId: form.organizationId || '',
           position: form.position,
+          isHrAdmin: form.isHrAdmin,
         });
         toast.success('수정되었습니다.');
         setShowDialog(false);
@@ -243,6 +240,7 @@ function UsersContent() {
           email: form.email, name: form.name, role: form.role,
           organizationId: form.organizationId || '',
           position: form.position || undefined,
+          isHrAdmin: form.isHrAdmin || undefined,
           isActive: false,
         });
         toast.success('사용자가 등록되었습니다. 초대 또는 직접 등록 버튼으로 계정을 활성화하세요.');
@@ -277,7 +275,9 @@ function UsersContent() {
       // (메인 auth는 HR 관리자로 유지되므로 Firestore 권한 정상)
       await createUser(cred.user.uid, {
         email: user.email, name: user.name, role: user.role,
-        organizationId: user.organizationId, position: user.position, isActive: true,
+        organizationId: user.organizationId, position: user.position,
+        isHrAdmin: user.isHrAdmin || undefined,
+        isActive: true,
       });
       if (user.id !== cred.user.uid) await deleteUser(user.id);
       setDirectResult({ name: user.name, email: user.email, password: TEMP_PASSWORD });
@@ -387,9 +387,16 @@ function UsersContent() {
                   <td className="px-4 py-3 font-medium text-gray-900">{user.name}</td>
                   <td className="px-4 py-3 text-gray-500">{user.email}</td>
                   <td className="px-4 py-3">
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_COLOR[user.role]}`}>
-                      {ROLES.find(r => r.value === user.role)?.label}
-                    </span>
+                    <div className="flex gap-1 flex-wrap">
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${ROLE_COLOR[user.role] ?? 'bg-gray-100 text-gray-700'}`}>
+                        {ROLES.find(r => r.value === user.role)?.label ?? user.role}
+                      </span>
+                      {user.isHrAdmin && (
+                        <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-medium text-orange-700">
+                          HR관리자
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-gray-500">{orgs.find(o => o.id === user.organizationId)?.name ?? '-'}</td>
                   <td className="px-4 py-3 text-gray-500">{user.position ?? '-'}</td>
@@ -542,6 +549,19 @@ function UsersContent() {
                     {ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="isHrAdmin"
+                  type="checkbox"
+                  checked={form.isHrAdmin}
+                  onChange={e => setForm(f => ({ ...f, isHrAdmin: e.target.checked }))}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="isHrAdmin" className="cursor-pointer">
+                  HR 관리자 권한 부여
+                  <span className="ml-1.5 text-xs text-gray-400 font-normal">(역할과 별개로 HR 관리 기능 접근 가능)</span>
+                </Label>
               </div>
               <div className="space-y-1.5">
                 <Label>소속 <span className="text-gray-400 text-xs font-normal">(나중에 지정 가능)</span></Label>

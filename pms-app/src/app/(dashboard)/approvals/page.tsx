@@ -14,7 +14,7 @@ import type { Goal, User as AppUser, Organization } from '@/types';
 
 export default function ApprovalsPage() {
   return (
-    <AuthGuard allowedRoles={['TEAM_LEAD', 'EXECUTIVE', 'CEO', 'HR_ADMIN']}>
+    <AuthGuard allowedRoles={['TEAM_LEAD', 'EXECUTIVE', 'CEO']}>
       <ApprovalsContent />
     </AuthGuard>
   );
@@ -68,20 +68,15 @@ function ApprovalsContent() {
   const isLead = userProfile?.role === 'TEAM_LEAD';
   const isExec = userProfile?.role === 'EXECUTIVE';
 
-  // HR_ADMIN은 MEMBER와 동일한 승인 흐름(팀장이 1차, 임원이 최종 승인)
-  function isMemberLike(role: string | undefined) {
-    return role === 'MEMBER' || role === 'HR_ADMIN';
-  }
-
   // 역할별 필터링
   const approvalGoals = goals.filter(g => {
     const ownerRole = users[g.userId]?.role;
     if (isLead) {
-      // 팀장: 팀원/HR관리자의 PENDING_APPROVAL
-      return g.status === 'PENDING_APPROVAL' && isMemberLike(ownerRole);
+      // 팀장: 팀원의 PENDING_APPROVAL
+      return g.status === 'PENDING_APPROVAL' && ownerRole === 'MEMBER';
     }
     if (isExec) {
-      // 임원: 팀원/HR관리자의 LEAD_APPROVED + 팀장의 PENDING_APPROVAL
+      // 임원: 팀원의 LEAD_APPROVED + 팀장의 PENDING_APPROVAL
       return g.status === 'LEAD_APPROVED' ||
         (g.status === 'PENDING_APPROVAL' && ownerRole === 'TEAM_LEAD');
     }
@@ -92,12 +87,12 @@ function ApprovalsContent() {
     if (g.status !== 'COMPLETED') return false;
     const ownerRole = users[g.userId]?.role;
     if (isLead) {
-      // 팀장: 팀원/HR관리자의 완료 1차 확인 (leadApprovedBy 없는 것)
-      return isMemberLike(ownerRole) && !g.leadApprovedBy;
+      // 팀장: 팀원의 완료 1차 확인 (leadApprovedBy 없는 것)
+      return ownerRole === 'MEMBER' && !g.leadApprovedBy;
     }
     if (isExec) {
-      // 임원: 팀원/HR관리자의 완료 최종 확인 (leadApprovedBy 있는 것) + 팀장의 완료 확인
-      return (isMemberLike(ownerRole) && !!g.leadApprovedBy && !g.approvedBy) ||
+      // 임원: 팀원의 완료 최종 확인 (leadApprovedBy 있는 것) + 팀장의 완료 확인
+      return (ownerRole === 'MEMBER' && !!g.leadApprovedBy && !g.approvedBy) ||
         (ownerRole === 'TEAM_LEAD' && !g.approvedBy);
     }
     return !g.approvedBy;
@@ -106,7 +101,7 @@ function ApprovalsContent() {
   const abandonGoals = goals.filter(g => {
     if (g.status !== 'PENDING_ABANDON') return false;
     const ownerRole = users[g.userId]?.role;
-    if (isLead) return isMemberLike(ownerRole);
+    if (isLead) return ownerRole === 'MEMBER';
     if (isExec) return ownerRole === 'TEAM_LEAD';
     return true;
   });

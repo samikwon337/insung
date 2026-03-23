@@ -67,7 +67,7 @@ export default function ProgressPage() {
   const [treeNodes, setTreeNodes] = useState<ReturnType<typeof buildTree>>([]);
 
   const isTreeRole = userProfile?.role === 'TEAM_LEAD';
-  const isHrAdmin = userProfile?.role === 'HR_ADMIN';
+  const isHrAdmin = !!userProfile?.isHrAdmin;
 
   useEffect(() => {
     if (!userProfile) return;
@@ -95,7 +95,7 @@ export default function ProgressPage() {
           }
           const scopeOrgs = allOrgs.filter(o => scopeOrgIds.includes(o.id));
           setTreeNodes(buildTree(null, scopeOrgs, usersByOrg, goalsByUser));
-        } else if (role === 'HR_ADMIN') {
+        } else if (isHrAdmin) {
           // HR 관리자: 전체 조직 트리 + 본인 목표 모두 로드
           const [allUsers, allOrgs, allGoals, ownGoals] = await Promise.all([
             getAllUsers(), getOrganizations(), getAllGoalsByYear(year),

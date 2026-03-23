@@ -20,7 +20,7 @@ const MILEAGE_ROLES = ['MEMBER', 'TEAM_LEAD'] as const;
 
 export default function MileagePage() {
   return (
-    <AuthGuard allowedRoles={['HR_ADMIN', 'CEO']}>
+    <AuthGuard allowedRoles={['CEO']} requireHrAdmin>
       <MileageContent />
     </AuthGuard>
   );

@@ -25,6 +25,7 @@ interface NavItem {
   href: string;
   icon: React.ReactNode;
   roles?: UserRole[];
+  requireHrAdmin?: boolean;  // true면 isHrAdmin 사용자도 표시
 }
 
 const navItems: NavItem[] = [
@@ -39,14 +40,15 @@ const navItems: NavItem[] = [
     label: '내 목표',
     href: '/goals',
     icon: <Target className="h-5 w-5" />,
-    roles: ['MEMBER', 'TEAM_LEAD', 'HR_ADMIN'],
+    roles: ['MEMBER', 'TEAM_LEAD'],
   },
-  // ── 진행현황 (팀원/팀장/HR만 — 임원·CEO는 대시보드가 진행현황) ─
+  // ── 진행현황 (팀원/팀장) ──────────────────────
   {
     label: '진행 현황',
     href: '/progress',
     icon: <TrendingUp className="h-5 w-5" />,
-    roles: ['MEMBER', 'TEAM_LEAD', 'HR_ADMIN'],
+    roles: ['MEMBER', 'TEAM_LEAD'],
+    requireHrAdmin: true,  // HR관리자도 진행현황 접근
   },
   // ── 1on1 (팀원·팀장·임원) ──────────────────────
   {
@@ -74,38 +76,40 @@ const navItems: NavItem[] = [
     label: '조직평가 관리',
     href: '/evaluation/org',
     icon: <BarChart3 className="h-5 w-5" />,
-    roles: ['CEO', 'HR_ADMIN'],
+    roles: ['CEO'],
+    requireHrAdmin: true,
   },
   // ── HR관리자 전용 ──────────────────────────────
   {
     label: '사용자 관리',
     href: '/admin/users',
     icon: <Users className="h-5 w-5" />,
-    roles: ['HR_ADMIN'],
+    requireHrAdmin: true,
   },
   {
     label: '조직 관리',
     href: '/admin/organizations',
     icon: <Building2 className="h-5 w-5" />,
-    roles: ['HR_ADMIN'],
+    requireHrAdmin: true,
   },
   {
     label: '연간 목표 관리',
     href: '/admin/annual-goals',
     icon: <Flag className="h-5 w-5" />,
-    roles: ['HR_ADMIN'],
+    requireHrAdmin: true,
   },
   {
     label: '마일리지 관리',
     href: '/admin/mileage',
     icon: <Star className="h-5 w-5" />,
-    roles: ['HR_ADMIN', 'CEO'],
+    roles: ['CEO'],
+    requireHrAdmin: true,
   },
   {
     label: '시스템 설정',
     href: '/admin/settings',
     icon: <Settings className="h-5 w-5" />,
-    roles: ['HR_ADMIN'],
+    requireHrAdmin: true,
   },
 ];
 
@@ -119,9 +123,13 @@ export default function Sidebar() {
     router.replace('/login');
   }
 
-  const visibleItems = navItems.filter(
-    (item) => !item.roles || (userProfile && item.roles.includes(userProfile.role))
-  );
+  const visibleItems = navItems.filter(item => {
+    const roleOk = !item.roles || (!!userProfile && item.roles.includes(userProfile.role));
+    const hrOk = !!item.requireHrAdmin && !!userProfile?.isHrAdmin;
+    // 역할 제한과 HR 제한이 모두 없으면 모두에게 표시
+    if (!item.roles && !item.requireHrAdmin) return true;
+    return roleOk || hrOk;
+  });
 
   return (
     <aside className="flex h-full w-60 flex-col border-r border-gray-200 bg-white">
@@ -162,9 +170,16 @@ export default function Sidebar() {
       {userProfile && (
         <div className="border-t border-gray-200 px-4 py-3 space-y-2">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="space-y-1">
               <p className="text-xs font-medium text-gray-900">{userProfile.name}</p>
-              <RoleBadge role={userProfile.role} />
+              <div className="flex gap-1 flex-wrap">
+                <RoleBadge role={userProfile.role} />
+                {userProfile.isHrAdmin && (
+                  <span className="inline-block rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-medium text-orange-700">
+                    HR관리자
+                  </span>
+                )}
+              </div>
             </div>
             <button
               onClick={handleLogout}
@@ -186,7 +201,6 @@ function RoleBadge({ role }: { role: UserRole }) {
     TEAM_LEAD: { label: '팀장', color: 'bg-green-100 text-green-700' },
     EXECUTIVE: { label: '임원', color: 'bg-purple-100 text-purple-700' },
     CEO: { label: '최고관리자', color: 'bg-blue-100 text-blue-700' },
-    HR_ADMIN: { label: 'HR관리자', color: 'bg-orange-100 text-orange-700' },
   };
   const { label, color } = labels[role];
   return (

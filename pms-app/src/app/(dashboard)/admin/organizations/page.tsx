@@ -69,7 +69,7 @@ function buildOrgTree(orgs: Organization[]): OrgTreeNode[] {
 
 export default function OrganizationsPage() {
   return (
-    <AuthGuard allowedRoles={['HR_ADMIN', 'CEO']}>
+    <AuthGuard allowedRoles={['CEO']} requireHrAdmin>
       <OrganizationsContent />
     </AuthGuard>
   );

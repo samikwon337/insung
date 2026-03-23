@@ -8,9 +8,22 @@ import type { UserRole } from '@/types';
 interface AuthGuardProps {
   children: React.ReactNode;
   allowedRoles?: UserRole[];
+  requireHrAdmin?: boolean;  // true면 isHrAdmin 사용자도 접근 가능
 }
 
-export default function AuthGuard({ children, allowedRoles }: AuthGuardProps) {
+function canAccess(
+  profile: { role: UserRole; isHrAdmin?: boolean } | null,
+  allowedRoles?: UserRole[],
+  requireHrAdmin?: boolean,
+): boolean {
+  if (!profile) return false;
+  if (!allowedRoles && !requireHrAdmin) return true;
+  const roleOk = !!allowedRoles && allowedRoles.includes(profile.role);
+  const hrOk = !!requireHrAdmin && !!profile.isHrAdmin;
+  return roleOk || hrOk;
+}
+
+export default function AuthGuard({ children, allowedRoles, requireHrAdmin }: AuthGuardProps) {
   const { firebaseUser, userProfile, loading } = useAuth();
   const router = useRouter();
 
@@ -22,10 +35,10 @@ export default function AuthGuard({ children, allowedRoles }: AuthGuardProps) {
       return;
     }
 
-    if (allowedRoles && userProfile && !allowedRoles.includes(userProfile.role)) {
+    if ((allowedRoles || requireHrAdmin) && userProfile && !canAccess(userProfile, allowedRoles, requireHrAdmin)) {
       router.replace('/dashboard');
     }
-  }, [firebaseUser, userProfile, loading, allowedRoles, router]);
+  }, [firebaseUser, userProfile, loading, allowedRoles, requireHrAdmin, router]);
 
   if (loading) {
     return (
@@ -37,7 +50,7 @@ export default function AuthGuard({ children, allowedRoles }: AuthGuardProps) {
 
   if (!firebaseUser) return null;
 
-  if (allowedRoles && userProfile && !allowedRoles.includes(userProfile.role)) {
+  if ((allowedRoles || requireHrAdmin) && userProfile && !canAccess(userProfile, allowedRoles, requireHrAdmin)) {
     return null;
   }
 

@@ -164,7 +164,7 @@ export default function GoalDetailPage() {
       let historyComment = '';
 
       // HR_ADMIN은 MEMBER와 동일한 승인 흐름
-      const ownerIsMemberLike = ownerRole === 'MEMBER' || ownerRole === 'HR_ADMIN';
+      const ownerIsMemberLike = ownerRole === 'MEMBER';
 
       if (isLead) {
         if (goal.status === 'PENDING_APPROVAL' && ownerIsMemberLike) {
@@ -269,7 +269,7 @@ export default function GoalDetailPage() {
   const ownerRole = goalOwner?.role;
 
   // HR_ADMIN은 MEMBER와 동일한 승인 흐름을 따름
-  const ownerIsMemberLike = ownerRole === 'MEMBER' || ownerRole === 'HR_ADMIN';
+  const ownerIsMemberLike = ownerRole === 'MEMBER';
 
   const canEdit = isOwner && ['DRAFT', 'REJECTED'].includes(goal.status);
   const canRequestApproval = isOwner && ['DRAFT', 'REJECTED'].includes(goal.status);

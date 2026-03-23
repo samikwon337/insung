@@ -20,7 +20,7 @@ import type { AnnualGoal, Organization } from '@/types';
 
 export default function AnnualGoalsPage() {
   return (
-    <AuthGuard allowedRoles={['HR_ADMIN']}>
+    <AuthGuard requireHrAdmin>
       <AnnualGoalsContent />
     </AuthGuard>
   );

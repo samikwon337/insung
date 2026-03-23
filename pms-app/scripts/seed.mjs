@@ -110,9 +110,10 @@ const users = [
     email: 'sslee@insungind.co.kr',
     password: 'Insung@1234!',
     name: '이상수',
-    role: 'HR_ADMIN',
-    position: 'HR관리자',
-    orgId: 'company-001',
+    role: 'MEMBER',      // 조직 역할: 팀원
+    isHrAdmin: true,     // HR 관리자 권한 별도 부여
+    position: 'HR담당',
+    orgId: 'team-001',   // 생산1팀 소속
   },
   {
     uid: 'ceo-fixed-uid',
@@ -227,6 +228,7 @@ async function seed() {
       organizationId: user.orgId,
       position: user.position,
       isActive: true,
+      isHrAdmin: user.isHrAdmin ?? false,
       createdAt: now,
       updatedAt: now,
     });

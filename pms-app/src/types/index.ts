@@ -5,8 +5,8 @@ export type UserRole =
   | 'MEMBER'       // 일반 팀원
   | 'TEAM_LEAD'    // 팀장
   | 'EXECUTIVE'    // 조직담당 임원
-  | 'CEO'          // 최고관리자
-  | 'HR_ADMIN';    // HR관리자
+  | 'CEO';         // 최고관리자
+  // HR관리자는 별도 isHrAdmin 플래그로 표현 — 어떤 역할과도 조합 가능
 
 // ─────────────────────────────────────────────
 // 조직
@@ -33,6 +33,7 @@ export interface User {
   position?: string;        // 직책
   photoURL?: string;
   isActive: boolean;
+  isHrAdmin?: boolean;      // HR 관리자 권한 (역할과 독립적으로 부여)
   createdAt: Date;
   updatedAt: Date;
 }

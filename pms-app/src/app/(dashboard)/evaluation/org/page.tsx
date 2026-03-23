@@ -91,7 +91,7 @@ function calcAutoQuotas(
 
 export default function OrgEvaluationPage() {
   return (
-    <AuthGuard allowedRoles={['HR_ADMIN', 'CEO']}>
+    <AuthGuard allowedRoles={['CEO']} requireHrAdmin>
       <OrgEvaluationContent />
     </AuthGuard>
   );
@@ -101,7 +101,7 @@ function OrgEvaluationContent() {
   const { userProfile } = useAuth();
   const year = new Date().getFullYear();
   const isCeo = userProfile?.role === 'CEO';
-  const isHrAdmin = userProfile?.role === 'HR_ADMIN';
+  const isHrAdmin = !!userProfile?.isHrAdmin;
 
   // 공통 데이터
   const [allOrgs, setAllOrgs] = useState<Organization[]>([]);
