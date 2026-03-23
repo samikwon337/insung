@@ -13,8 +13,10 @@ import AuthGuard from '@/components/layout/AuthGuard';
 import { Plus, Pencil, UserX, Download, Upload, AlertCircle, Trash2, Mail, Copy, Check, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import type { User, Organization, UserRole } from '@/types';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth, connectAuthEmulator, createUserWithEmailAndPassword } from 'firebase/auth';
+import { firebaseConfig } from '@/lib/firebase';
+import { isEmulator } from '@/lib/auth';
 import * as XLSX from 'xlsx';
 
 const TEMP_PASSWORD = 'Insung@1234!';
@@ -143,7 +145,7 @@ function UsersContent() {
     const body = encodeURIComponent(
       `${inviteName}님, 안녕하세요.\n\nINSUNG 목표성과관리 시스템에 초대되었습니다.\n\n아래 링크를 클릭하여 계정을 설정해주세요.\n\n${inviteLink}\n\n링크는 7일간 유효합니다.`
     );
-    window.open(`mailto:${inviteEmail}?subject=${subject}&body=${body}`);
+    window.location.href = `mailto:${inviteEmail}?subject=${subject}&body=${body}`;
   }
 
   // ── 엑셀 업로드 ──────────────────────────────
@@ -261,9 +263,18 @@ function UsersContent() {
 
   async function handleDirectRegister(user: User) {
     setSaving(true);
+    // 현재 HR 관리자 세션을 유지하기 위해 세컨더리 앱으로 신규 계정 생성
+    const secondaryAppName = `secondary-${Date.now()}`;
+    const secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+    const secondaryAuth = getAuth(secondaryApp);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, user.email, TEMP_PASSWORD);
+      if (isEmulator) {
+        const host = process.env.NEXT_PUBLIC_EMULATOR_HOST ?? 'localhost';
+        connectAuthEmulator(secondaryAuth, `http://${host}:9099`, { disableWarnings: true });
+      }
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, user.email, TEMP_PASSWORD);
       // 기존 placeholder 문서(random UUID) 삭제 후 Firebase Auth UID로 재생성
+      // (메인 auth는 HR 관리자로 유지되므로 Firestore 권한 정상)
       await createUser(cred.user.uid, {
         email: user.email, name: user.name, role: user.role,
         organizationId: user.organizationId, position: user.position, isActive: true,
@@ -273,7 +284,10 @@ function UsersContent() {
       await load();
     } catch (e: any) {
       toast.error(`직접 등록 실패: ${e?.code ?? e?.message}`);
-    } finally { setSaving(false); }
+    } finally {
+      await deleteApp(secondaryApp);
+      setSaving(false);
+    }
   }
 
   async function handleDelete() {

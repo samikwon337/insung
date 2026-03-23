@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { getAllUsers, getOrganizations, getAllGoalsByYear, getGoalsByUser } from '@/lib/firestore';
+import { toast } from 'sonner';
 import Header from '@/components/layout/Header';
 import { Progress } from '@/components/ui/progress';
 import GoalStatusBadge from '@/components/goals/GoalStatusBadge';
@@ -65,23 +66,44 @@ export default function ProgressPage() {
   const [myGoals, setMyGoals] = useState<Goal[]>([]);
   const [treeNodes, setTreeNodes] = useState<ReturnType<typeof buildTree>>([]);
 
-  const isTreeRole = ['TEAM_LEAD', 'HR_ADMIN'].includes(userProfile?.role ?? '');
+  const isTreeRole = userProfile?.role === 'TEAM_LEAD';
+  const isHrAdmin = userProfile?.role === 'HR_ADMIN';
 
   useEffect(() => {
     if (!userProfile) return;
     const profile = userProfile;
     const role = profile.role;
-    const treeRole = ['TEAM_LEAD', 'HR_ADMIN'].includes(role);
     async function load() {
       try {
-        if (treeRole) {
+        if (role === 'TEAM_LEAD') {
           const [allUsers, allOrgs, allGoals] = await Promise.all([
             getAllUsers(), getOrganizations(), getAllGoalsByYear(year),
           ]);
-          const scopeOrgIds = role === 'TEAM_LEAD'
-            ? findDescendantIds(profile.organizationId, allOrgs)
-            : allOrgs.map(o => o.id);
+          const scopeOrgIds = findDescendantIds(profile.organizationId, allOrgs);
+          const scopeUsers = allUsers.filter(u => scopeOrgIds.includes(u.organizationId));
+          const scopeGoals = allGoals.filter(g => new Set(scopeUsers.map(u => u.id)).has(g.userId));
 
+          const usersByOrg: Record<string, User[]> = {};
+          for (const u of scopeUsers) {
+            if (!usersByOrg[u.organizationId]) usersByOrg[u.organizationId] = [];
+            usersByOrg[u.organizationId].push(u);
+          }
+          const goalsByUser: Record<string, Goal[]> = {};
+          for (const g of scopeGoals) {
+            if (!goalsByUser[g.userId]) goalsByUser[g.userId] = [];
+            goalsByUser[g.userId].push(g);
+          }
+          const scopeOrgs = allOrgs.filter(o => scopeOrgIds.includes(o.id));
+          setTreeNodes(buildTree(null, scopeOrgs, usersByOrg, goalsByUser));
+        } else if (role === 'HR_ADMIN') {
+          // HR 관리자: 전체 조직 트리 + 본인 목표 모두 로드
+          const [allUsers, allOrgs, allGoals, ownGoals] = await Promise.all([
+            getAllUsers(), getOrganizations(), getAllGoalsByYear(year),
+            getGoalsByUser(profile.id, year),
+          ]);
+          setMyGoals(ownGoals);
+
+          const scopeOrgIds = allOrgs.map(o => o.id);
           const scopeUsers = allUsers.filter(u => scopeOrgIds.includes(u.organizationId));
           const scopeGoals = allGoals.filter(g => new Set(scopeUsers.map(u => u.id)).has(g.userId));
 
@@ -102,6 +124,7 @@ export default function ProgressPage() {
         }
       } catch (e: any) {
         console.error('진행현황 로드 실패:', e);
+        toast.error('진행 현황을 불러오지 못했습니다.');
       } finally { setLoading(false); }
     }
     load();
@@ -113,18 +136,27 @@ export default function ProgressPage() {
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-4xl space-y-4">
           <p className="text-sm text-gray-500">
-            {year}년 {isTreeRole ? '조직' : '내'} 목표 진행 현황
+            {year}년 {(isTreeRole || isHrAdmin) ? '조직' : '내'} 목표 진행 현황
           </p>
           {loading ? (
             <div className="space-y-3">
               {[1,2,3].map(i => <div key={i} className="h-12 animate-pulse rounded-xl bg-gray-100" />)}
             </div>
-          ) : isTreeRole ? (
-            <div className="rounded-xl border bg-white p-4 space-y-1">
-              {treeNodes.length === 0
-                ? <p className="text-center text-sm text-gray-400 py-8">표시할 데이터가 없습니다.</p>
-                : treeNodes.map(node => <OrgTreeNode key={node.org.id} node={node} />)}
-            </div>
+          ) : (isTreeRole || isHrAdmin) ? (
+            <>
+              {/* HR 관리자: 본인 목표 별도 표시 */}
+              {isHrAdmin && myGoals.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">내 목표</p>
+                  <PersonalProgressView goals={myGoals} loading={false} />
+                </div>
+              )}
+              <div className="rounded-xl border bg-white p-4 space-y-1">
+                {treeNodes.length === 0
+                  ? <p className="text-center text-sm text-gray-400 py-8">표시할 데이터가 없습니다.</p>
+                  : treeNodes.map(node => <OrgTreeNode key={node.org.id} node={node} />)}
+              </div>
+            </>
           ) : (
             <PersonalProgressView goals={myGoals} loading={loading} />
           )}

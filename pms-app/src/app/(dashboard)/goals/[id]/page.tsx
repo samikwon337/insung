@@ -163,13 +163,16 @@ export default function GoalDetailPage() {
       let successMsg = '';
       let historyComment = '';
 
+      // HR_ADMIN은 MEMBER와 동일한 승인 흐름
+      const ownerIsMemberLike = ownerRole === 'MEMBER' || ownerRole === 'HR_ADMIN';
+
       if (isLead) {
-        if (goal.status === 'PENDING_APPROVAL' && ownerRole === 'MEMBER') {
+        if (goal.status === 'PENDING_APPROVAL' && ownerIsMemberLike) {
           newStatus = 'LEAD_APPROVED';
           updateData = { status: 'LEAD_APPROVED', leadApprovedBy: userProfile.id, leadApprovedAt: new Date() };
           successMsg = '1차 승인했습니다. 임원의 최종 승인을 기다립니다.';
           historyComment = '팀장 1차 승인';
-        } else if (goal.status === 'COMPLETED' && !goal.leadApprovedBy && ownerRole === 'MEMBER') {
+        } else if (goal.status === 'COMPLETED' && !goal.leadApprovedBy && ownerIsMemberLike) {
           updateData = { leadApprovedBy: userProfile.id, leadApprovedAt: new Date() };
           successMsg = '완료를 1차 확인했습니다. 임원의 최종 확인을 기다립니다.';
           historyComment = '팀장 완료 1차 확인';
@@ -190,7 +193,7 @@ export default function GoalDetailPage() {
           updateData = { status: 'APPROVED', approvedBy: userProfile.id, approvedAt: new Date() };
           successMsg = '목표를 승인했습니다.';
           historyComment = '임원 승인';
-        } else if (goal.status === 'COMPLETED' && goal.leadApprovedBy && ownerRole === 'MEMBER') {
+        } else if (goal.status === 'COMPLETED' && goal.leadApprovedBy && ownerIsMemberLike) {
           updateData = { approvedBy: userProfile.id, approvedAt: new Date() };
           successMsg = '완료를 최종 확인했습니다.';
           historyComment = '임원 완료 최종 확인';
@@ -265,6 +268,9 @@ export default function GoalDetailPage() {
   const isExec = userProfile.role === 'EXECUTIVE';
   const ownerRole = goalOwner?.role;
 
+  // HR_ADMIN은 MEMBER와 동일한 승인 흐름을 따름
+  const ownerIsMemberLike = ownerRole === 'MEMBER' || ownerRole === 'HR_ADMIN';
+
   const canEdit = isOwner && ['DRAFT', 'REJECTED'].includes(goal.status);
   const canRequestApproval = isOwner && ['DRAFT', 'REJECTED'].includes(goal.status);
   const canRequestCompletion = isOwner && ['APPROVED', 'IN_PROGRESS'].includes(goal.status);
@@ -272,22 +278,22 @@ export default function GoalDetailPage() {
   const canUpdateProgress = isOwner && ['APPROVED', 'IN_PROGRESS'].includes(goal.status);
 
   const canLeadApprove = isLead && (
-    (goal.status === 'PENDING_APPROVAL' && ownerRole === 'MEMBER') ||
-    (goal.status === 'COMPLETED' && !goal.leadApprovedBy && ownerRole === 'MEMBER') ||
-    (goal.status === 'PENDING_ABANDON' && ownerRole === 'MEMBER')
+    (goal.status === 'PENDING_APPROVAL' && ownerIsMemberLike) ||
+    (goal.status === 'COMPLETED' && !goal.leadApprovedBy && ownerIsMemberLike) ||
+    (goal.status === 'PENDING_ABANDON' && ownerIsMemberLike)
   );
 
   const canExecApprove = isExec && (
     goal.status === 'LEAD_APPROVED' ||
     (goal.status === 'PENDING_APPROVAL' && ownerRole === 'TEAM_LEAD') ||
-    (goal.status === 'COMPLETED' && !!goal.leadApprovedBy && ownerRole === 'MEMBER') ||
+    (goal.status === 'COMPLETED' && !!goal.leadApprovedBy && ownerIsMemberLike) ||
     (goal.status === 'COMPLETED' && ownerRole === 'TEAM_LEAD') ||
     (goal.status === 'PENDING_ABANDON' && ownerRole === 'TEAM_LEAD')
   );
 
   const canApprove = canLeadApprove || canExecApprove;
 
-  const canReject = (isLead && ['PENDING_APPROVAL', 'COMPLETED'].includes(goal.status) && ownerRole === 'MEMBER') ||
+  const canReject = (isLead && ['PENDING_APPROVAL', 'COMPLETED'].includes(goal.status) && ownerIsMemberLike) ||
     (isExec && ['LEAD_APPROVED', 'PENDING_APPROVAL', 'COMPLETED'].includes(goal.status));
 
   function getApproveLabel() {
@@ -306,9 +312,9 @@ export default function GoalDetailPage() {
   }
 
   const completionStep = goal.status === 'COMPLETED'
-    ? (!goal.leadApprovedBy && ownerRole === 'MEMBER'
+    ? (!goal.leadApprovedBy && ownerIsMemberLike
         ? '팀장 1차 확인 대기'
-        : goal.leadApprovedBy && !goal.approvedBy && ownerRole === 'MEMBER'
+        : goal.leadApprovedBy && !goal.approvedBy && ownerIsMemberLike
           ? '임원 최종 확인 대기'
           : ownerRole === 'TEAM_LEAD' && !goal.approvedBy
             ? '임원 확인 대기'
