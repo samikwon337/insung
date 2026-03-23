@@ -202,7 +202,7 @@ function RoleBadge({ role }: { role: UserRole }) {
     EXECUTIVE: { label: '임원', color: 'bg-purple-100 text-purple-700' },
     CEO: { label: '최고관리자', color: 'bg-blue-100 text-blue-700' },
   };
-  const { label, color } = labels[role];
+  const { label, color } = labels[role] ?? { label: role, color: 'bg-gray-100 text-gray-700' };
   return (
     <span className={cn('inline-block rounded-full px-2.5 py-0.5 text-xs font-medium', color)}>
       {label}
