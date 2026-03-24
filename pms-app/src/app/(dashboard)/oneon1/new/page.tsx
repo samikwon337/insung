@@ -25,21 +25,10 @@ export default function NewOneOnOnePage() {
   useEffect(() => {
     if (!userProfile) return;
     getAllUsers().then(users => {
-      if (isLead) {
-        // 팀장 → 같은 조직의 팀원 선택
-        setCounterparts(users.filter(u =>
-          u.role === 'MEMBER' && u.organizationId === userProfile.organizationId && u.isActive
-        ));
-      } else {
-        // 팀원 → 팀장 선택 (같은 조직 우선, 전체 팀장 포함)
-        const samOrgLeads = users.filter(u =>
-          u.role === 'TEAM_LEAD' && u.organizationId === userProfile.organizationId && u.isActive
-        );
-        const otherLeads = users.filter(u =>
-          u.role === 'TEAM_LEAD' && u.organizationId !== userProfile.organizationId && u.isActive
-        );
-        setCounterparts([...samOrgLeads, ...otherLeads]);
-      }
+      // 같은 부문의 본인 제외 모든 사용자
+      setCounterparts(users.filter(u =>
+        u.id !== userProfile.id && u.organizationId === userProfile.organizationId
+      ));
     });
   }, [userProfile]);
 
@@ -73,9 +62,12 @@ export default function NewOneOnOnePage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
                 <Label>{isLead ? '팀원 선택' : '팀장 선택'} *</Label>
-                <Select onValueChange={(v: string | null) => setCounterpartId(v ?? '')}>
+                <Select value={counterpartId} onValueChange={(v: string | null) => setCounterpartId(v ?? '')}>
                   <SelectTrigger>
-                    <SelectValue placeholder={isLead ? '팀원을 선택하세요' : '팀장을 선택하세요'} />
+                    {counterpartId
+                      ? <span className="flex flex-1 text-left">{(() => { const u = counterparts.find(c => c.id === counterpartId); return u ? `${u.name}${u.position ? ` (${u.position})` : ''}` : ''; })()}</span>
+                      : <SelectValue placeholder={isLead ? '팀원을 선택하세요' : '팀장을 선택하세요'} />
+                    }
                   </SelectTrigger>
                   <SelectContent>
                     {counterparts.map(u => (

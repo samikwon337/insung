@@ -9,7 +9,7 @@ import {
 } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { onAuthChange } from '@/lib/auth';
-import { getUser } from '@/lib/firestore';
+import { getUser, updateUser } from '@/lib/firestore';
 import type { User } from '@/types';
 
 interface AuthContextValue {
@@ -33,10 +33,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthChange(async (fbUser) => {
       if (fbUser) {
         const profile = await getUser(fbUser.uid);
-        // 레거시 호환: role이 'HR_ADMIN'인 경우 → MEMBER + isHrAdmin: true로 변환
+        // 레거시 호환: role이 'HR_ADMIN'인 경우 → TEAM_LEAD + isHrAdmin: true로 변환
         if (profile && (profile.role as string) === 'HR_ADMIN') {
           profile.role = 'TEAM_LEAD';
           profile.isHrAdmin = true;
+          // Firestore 문서도 업데이트 (isOwner 권한으로 본인 문서는 항상 쓸 수 있음)
+          await updateUser(fbUser.uid, { role: 'TEAM_LEAD', isHrAdmin: true });
         }
         setFirebaseUser(fbUser);
         setUserProfile(profile);

@@ -17,7 +17,10 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
-    function isHrAdmin() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isHrAdmin == true; }
+    function isHrAdmin() {
+      let d = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return d.isHrAdmin == true || d.role == 'HR_ADMIN';
+    }
     function isCeo()     { return getRole() == 'CEO'; }
     function isExec()    { return getRole() == 'EXECUTIVE'; }
     function isLead()    { return getRole() == 'TEAM_LEAD'; }

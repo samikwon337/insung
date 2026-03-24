@@ -436,18 +436,18 @@ export async function getOneOnOnesByMember(memberId: string): Promise<OneOnOne[]
   const snap = await getDocs(query(
     collection(db, COLLECTIONS.ONE_ON_ONES),
     where('memberId', '==', memberId),
-    orderBy('createdAt', 'desc')
   ));
-  return snap.docs.map(d => mapOneOnOne(d.id, d.data()));
+  return snap.docs.map(d => mapOneOnOne(d.id, d.data()))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 export async function getOneOnOnesByLeader(leaderId: string): Promise<OneOnOne[]> {
   const snap = await getDocs(query(
     collection(db, COLLECTIONS.ONE_ON_ONES),
     where('leaderId', '==', leaderId),
-    orderBy('createdAt', 'desc')
   ));
-  return snap.docs.map(d => mapOneOnOne(d.id, d.data()));
+  return snap.docs.map(d => mapOneOnOne(d.id, d.data()))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 export async function getOneOnOne(id: string): Promise<OneOnOne | null> {
@@ -504,14 +504,13 @@ export async function getOrgEvaluations(year: number): Promise<OrganizationEvalu
   const snap = await getDocs(query(
     collection(db, COLLECTIONS.ORG_EVALUATIONS),
     where('cycleYear', '==', year),
-    orderBy('createdAt', 'desc')
   ));
   return snap.docs.map(d => ({
     ...d.data(), id: d.id,
     createdAt: fromTimestamp(d.data().createdAt) ?? new Date(),
     updatedAt: fromTimestamp(d.data().updatedAt) ?? new Date(),
     approvedAt: fromTimestamp(d.data().approvedAt),
-  } as OrganizationEvaluation));
+  } as OrganizationEvaluation)).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 export async function upsertOrgEvaluation(
